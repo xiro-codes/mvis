@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
+use clap::Parser;
 
 mod components;
 // mod physics; // removed
@@ -8,8 +9,53 @@ mod components;
 // mod spatial_hash; // removed
 mod gpu_pipeline;
 mod instanced_render;
+mod audio_analysis;
+mod mpd_client;
+mod config;
 
-#[derive(Resource, Clone, ExtractResource)]
+use serde::{Serialize, Deserialize};
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum AnimateSource {
+    Off,
+    Sine,
+    LowFreq,
+    MidFreq,
+    HighFreq,
+}
+
+#[derive(Resource)]
+pub struct MpdState {
+    pub receiver: crossbeam_channel::Receiver<(mpd_client::SongInfo, Option<Vec<u8>>)>,
+    pub current_song: Option<mpd_client::SongInfo>,
+    pub album_art: Option<Handle<Image>>,
+}
+
+#[derive(Component)]
+struct MpdAlbumArtNode;
+
+#[derive(Component)]
+struct MpdTextNode;
+
+fn animate_selector(ui: &mut egui::Ui, source: &mut AnimateSource) {
+    egui::ComboBox::from_id_salt(ui.next_auto_id())
+        .selected_text(match *source {
+            AnimateSource::Off => "Off",
+            AnimateSource::Sine => "Sine",
+            AnimateSource::LowFreq => "Bass",
+            AnimateSource::MidFreq => "Mids",
+            AnimateSource::HighFreq => "Treble",
+        })
+        .show_ui(ui, |ui| {
+            ui.selectable_value(source, AnimateSource::Off, "Off");
+            ui.selectable_value(source, AnimateSource::Sine, "Sine");
+            ui.selectable_value(source, AnimateSource::LowFreq, "Bass");
+            ui.selectable_value(source, AnimateSource::MidFreq, "Mids");
+            ui.selectable_value(source, AnimateSource::HighFreq, "Treble");
+        });
+}
+
+#[derive(Resource, Clone, ExtractResource, Serialize, Deserialize)]
 pub struct SimulationParams {
     pub particle_count: usize,
     pub particle_types: usize,
@@ -30,6 +76,15 @@ pub struct SimulationParams {
     pub continuous_mutation: bool,
     pub is_animating_time: bool,
     pub target_time_scale: f32,
+    pub animate_attraction: AnimateSource,
+    pub animate_min_dist: AnimateSource,
+    pub animate_interaction_radius: AnimateSource,
+    pub animate_density_limit: AnimateSource,
+    pub animate_dampening: AnimateSource,
+    pub animate_global_gravity: AnimateSource,
+    pub slider_animation_speed: f32,
+    pub slider_animation_time: f32,
+    pub audio_reactivity_power: f32,
 }
 
 impl Default for SimulationParams {
@@ -77,11 +132,24 @@ impl Default for SimulationParams {
             continuous_mutation: false,
             is_animating_time: true,
             target_time_scale: 0.05,
+            animate_attraction: AnimateSource::Off,
+            animate_min_dist: AnimateSource::Off,
+            animate_interaction_radius: AnimateSource::Off,
+            animate_density_limit: AnimateSource::Off,
+            animate_dampening: AnimateSource::Off,
+            animate_global_gravity: AnimateSource::Off,
+            slider_animation_speed: 1.0,
+            slider_animation_time: 0.0,
+            audio_reactivity_power: 1.0,
         }
     }
 }
 
 fn main() {
+    let app_config = config::AppConfig::load_or_create();
+    let sim_params = app_config.simulation.clone();
+    let mpd_config = app_config.mpd.clone();
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -91,33 +159,60 @@ fn main() {
             ..default()
         }))
         .insert_resource(ClearColor(Color::BLACK))
-        .init_resource::<SimulationParams>()
+        .insert_resource(sim_params)
+        .insert_resource(mpd_config)
         .add_plugins((
             gpu_pipeline::GpuPhysicsPlugin,
             instanced_render::InstancedRenderPlugin,
             EguiPlugin::default()
         ))
-        .add_systems(Startup, setup_camera)
-        .add_systems(Update, (camera_movement, animate_time_scale))
+        .add_systems(Startup, (setup_camera, setup_audio))
+        .add_systems(Update, (camera_movement, update_audio_stream, update_mpd_state, animate_time_scale))
         .add_systems(EguiPrimaryContextPass, ui_system)
         .run();
 }
 
-fn ui_system(mut contexts: EguiContexts, mut params: ResMut<SimulationParams>) {
+fn ui_system(mut contexts: EguiContexts, mut params: ResMut<SimulationParams>, mpd_config: Res<config::MpdConfig>) {
     if let Ok(ctx) = contexts.ctx_mut() {
         egui::Window::new("Simulation Controls").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("💾 Save Config").clicked() {
+                    let mut app_config = config::AppConfig::default();
+                    app_config.simulation = params.clone();
+                    app_config.mpd = mpd_config.clone();
+                    app_config.save();
+                }
+            });
+            ui.separator();
+            ui.add(egui::Slider::new(&mut params.audio_reactivity_power, 0.0..=20.0).text("Reactivity Power"));
             ui.add(egui::Slider::new(&mut params.particle_count, 10..=200_000).text("Particle Count"));
             ui.add(egui::Slider::new(&mut params.particle_types, 1..=10).text("Particle Types"));
-            ui.add(
-                egui::Slider::new(&mut params.attraction_strength, 0.0..=200.0)
-                    .text("Force Multiplier"),
-            );
+            ui.add(egui::Slider::new(&mut params.slider_animation_speed, 0.0..=5.0).text("Auto-Animate Speed"));
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(&mut params.attraction_strength, 0.0..=200.0).text("Force Multiplier"));
+                animate_selector(ui, &mut params.animate_attraction);
+            });
             ui.add(egui::Slider::new(&mut params.time_scale, 0.0..=2.0).text("Time Scale"));
-            ui.add(egui::Slider::new(&mut params.dampening, 0.5..=1.0).text("Dampening"));
-            ui.add(egui::Slider::new(&mut params.min_dist, 0.0..=200.0).text("Repulsion Radius"));
-            ui.add(egui::Slider::new(&mut params.interaction_radius, 50.0..=500.0).text("Interaction Radius"));
-            ui.add(egui::Slider::new(&mut params.density_limit, 0.0..=10.0).text("Density Limit"));
-            ui.add(egui::Slider::new(&mut params.global_gravity, 0.0..=0.01).text("Global Gravity"));
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(&mut params.dampening, 0.5..=1.0).text("Dampening"));
+                animate_selector(ui, &mut params.animate_dampening);
+            });
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(&mut params.min_dist, 0.0..=200.0).text("Repulsion Radius"));
+                animate_selector(ui, &mut params.animate_min_dist);
+            });
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(&mut params.interaction_radius, 50.0..=500.0).text("Interaction Radius"));
+                animate_selector(ui, &mut params.animate_interaction_radius);
+            });
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(&mut params.density_limit, 0.0..=10.0).text("Density Limit"));
+                animate_selector(ui, &mut params.animate_density_limit);
+            });
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(&mut params.global_gravity, 0.0..=1.0).text("Global Gravity"));
+                animate_selector(ui, &mut params.animate_global_gravity);
+            });
             ui.checkbox(&mut params.infinite_space, "Infinite Space (No Bounds)");
             
             ui.separator();
@@ -149,7 +244,7 @@ fn ui_system(mut contexts: EguiContexts, mut params: ResMut<SimulationParams>) {
                     params.interaction_radius = rng.gen_range(50.0..300.0);
                     params.density_limit = rng.gen_range(0.1..5.0);
                     params.dampening = rng.gen_range(0.8..0.99);
-                    params.global_gravity = rng.gen_range(0.0..0.005);
+                    params.global_gravity = rng.gen_range(0.0..0.1);
                 }
             });
             
@@ -173,7 +268,7 @@ fn ui_system(mut contexts: EguiContexts, mut params: ResMut<SimulationParams>) {
                 params.interaction_radius = rng.gen_range(50.0..300.0);
                 params.density_limit = rng.gen_range(0.1..5.0);
                 params.dampening = rng.gen_range(0.8..0.99);
-                params.global_gravity = rng.gen_range(0.0..0.005);
+                params.global_gravity = rng.gen_range(0.0..0.1);
                 
                 // Respawn and trigger time scale animation
                 params.spawn_seed = params.spawn_seed.wrapping_add(1);
@@ -218,6 +313,116 @@ fn ui_system(mut contexts: EguiContexts, mut params: ResMut<SimulationParams>) {
                 });
             });
         });
+    }
+}
+
+fn setup_audio(mut commands: Commands, mpd_config: Res<config::MpdConfig>) {
+    let stream_receiver = audio_analysis::start_audio_stream(&mpd_config.fifo_path);
+    commands.insert_resource(stream_receiver);
+
+    let (tx, rx) = crossbeam_channel::unbounded();
+    commands.insert_resource(MpdState {
+        receiver: rx,
+        current_song: None,
+        album_art: None,
+    });
+
+    let host = mpd_config.host.clone();
+    std::thread::spawn(move || {
+        let mut client = mpd_client::MpdClient::connect(&host);
+        let mut last_file = String::new();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if let Some(ref mut c) = client {
+                if let Some(song) = c.get_current_song() {
+                    if song.file != last_file {
+                        last_file = song.file.clone();
+                        let art = c.get_album_art(&song.file);
+                        let _ = tx.send((song, art));
+                    }
+                }
+            } else {
+                client = mpd_client::MpdClient::connect(&host);
+            }
+        }
+    });
+
+    // Spawn UI root node for MPD info
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(20.0),
+            left: Val::Px(20.0),
+            display: Display::Flex,
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(15.0),
+            padding: UiRect::all(Val::Px(10.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+    )).with_children(|parent| {
+        parent.spawn((
+            Node {
+                width: Val::Px(80.0),
+                height: Val::Px(80.0),
+                display: Display::None,
+                ..default()
+            },
+            ImageNode::default(),
+            MpdAlbumArtNode,
+        ));
+        parent.spawn((
+            Text::new("Waiting for MPD..."),
+            TextFont {
+                font_size: 20.0,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            MpdTextNode,
+        ));
+    });
+}
+
+fn update_audio_stream(mut stream: ResMut<audio_analysis::AudioStreamReceiver>) {
+    while let Ok(bands) = stream.receiver.try_recv() {
+        stream.current_bands = bands;
+    }
+}
+
+fn update_mpd_state(
+    mut state: ResMut<MpdState>,
+    mut images: ResMut<Assets<Image>>,
+    mut text_q: Query<&mut Text, With<MpdTextNode>>,
+    mut art_q: Query<(&mut ImageNode, &mut Node), With<MpdAlbumArtNode>>,
+) {
+    if let Ok((song, art_bytes)) = state.receiver.try_recv() {
+        state.current_song = Some(song.clone());
+        
+        let art_handle = if let Some(bytes) = art_bytes {
+            if let Ok(dyn_img) = image::load_from_memory(&bytes) {
+                let img = Image::from_dynamic(dyn_img, true, bevy::asset::RenderAssetUsages::default());
+                Some(images.add(img))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        state.album_art = art_handle.clone();
+
+        for mut text in &mut text_q {
+            text.0 = format!("{}\n{}", song.title, song.artist);
+        }
+
+        for (mut ui_image, mut node) in &mut art_q {
+            if let Some(h) = &art_handle {
+                ui_image.image = h.clone();
+                node.display = Display::Flex;
+            } else {
+                node.display = Display::None;
+            }
+        }
     }
 }
 
@@ -281,8 +486,45 @@ fn camera_movement(
 
 fn animate_time_scale(
     mut params: ResMut<SimulationParams>,
+    stream: Option<Res<audio_analysis::AudioStreamReceiver>>,
     time: Res<Time>,
 ) {
+    if params.slider_animation_speed > 0.0 {
+        params.slider_animation_time += time.delta_secs() * params.slider_animation_speed;
+    }
+    
+    let wave_sine = (params.slider_animation_time.sin() + 1.0) * 0.5; // 0 to 1
+    let reactivity = params.audio_reactivity_power;
+
+    let get_band = |source: AnimateSource| -> Option<f32> {
+        match source {
+            AnimateSource::Off => None,
+            AnimateSource::Sine => Some(wave_sine),
+            AnimateSource::LowFreq => stream.as_deref().map(|s| s.current_bands.low * reactivity),
+            AnimateSource::MidFreq => stream.as_deref().map(|s| s.current_bands.mid * reactivity),
+            AnimateSource::HighFreq => stream.as_deref().map(|s| s.current_bands.high * reactivity),
+        }
+    };
+
+    if let Some(v) = get_band(params.animate_attraction) {
+        params.attraction_strength = v * 200.0;
+    }
+    if let Some(v) = get_band(params.animate_dampening) {
+        params.dampening = 0.5 + v * 0.5;
+    }
+    if let Some(v) = get_band(params.animate_min_dist) {
+        params.min_dist = v * 200.0;
+    }
+    if let Some(v) = get_band(params.animate_interaction_radius) {
+        params.interaction_radius = 50.0 + v * 450.0;
+    }
+    if let Some(v) = get_band(params.animate_density_limit) {
+        params.density_limit = v * 10.0;
+    }
+    if let Some(v) = get_band(params.animate_global_gravity) {
+        params.global_gravity = v * 1.0;
+    }
+
     if params.is_animating_time {
         if params.time_scale > params.target_time_scale {
             params.time_scale -= time.delta_secs() * 0.5;
