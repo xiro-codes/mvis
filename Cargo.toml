@@ -1,7 +1,10 @@
 [package]
 name = "bevy-app"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 bevy = "0.17"
+bevy_egui = "0.37"
+bytemuck = { version = "1.25.0", features = ["derive"] }
+rand = "0.8"
