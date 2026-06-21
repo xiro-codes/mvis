@@ -27,6 +27,9 @@ pub struct SimulationParams {
     pub global_gravity: f32,
     pub type_proportions: [f32; 10],
     pub spawn_seed: u32,
+    pub continuous_mutation: bool,
+    pub is_animating_time: bool,
+    pub target_time_scale: f32,
 }
 
 impl Default for SimulationParams {
@@ -58,7 +61,7 @@ impl Default for SimulationParams {
             particle_count: 50_000, // Cranked up to 50k by default
             particle_types: 6,
             attraction_strength: 50.0,
-            time_scale: 1.0,
+            time_scale: 0.05,
             min_dist: 20.0,
             region_size: Vec2::new(2560.0, 1440.0),
             scale: 2.0, // Scale down visual size for high count
@@ -71,6 +74,9 @@ impl Default for SimulationParams {
             global_gravity: 0.0,
             type_proportions: [1.0; 10],
             spawn_seed: 0,
+            continuous_mutation: false,
+            is_animating_time: true,
+            target_time_scale: 0.05,
         }
     }
 }
@@ -146,6 +152,38 @@ fn ui_system(mut contexts: EguiContexts, mut params: ResMut<SimulationParams>) {
                     params.global_gravity = rng.gen_range(0.0..0.005);
                 }
             });
+            
+            ui.separator();
+            if ui.button("Randomize Everything & Reset").clicked() {
+                use rand::Rng;
+                let mut rng = rand::thread_rng();
+                // Randomize rules
+                for i in 0..10 {
+                    for j in 0..10 {
+                        params.interaction_matrix[i][j] = rng.gen_range(-1.0..1.0);
+                    }
+                }
+                // Randomize proportions
+                for i in 0..10 {
+                    params.type_proportions[i] = rng.gen_range(0.1..2.0);
+                }
+                // Randomize world
+                params.attraction_strength = rng.gen_range(10.0..150.0);
+                params.min_dist = rng.gen_range(5.0..100.0);
+                params.interaction_radius = rng.gen_range(50.0..300.0);
+                params.density_limit = rng.gen_range(0.1..5.0);
+                params.dampening = rng.gen_range(0.8..0.99);
+                params.global_gravity = rng.gen_range(0.0..0.005);
+                
+                // Respawn and trigger time scale animation
+                params.spawn_seed = params.spawn_seed.wrapping_add(1);
+                params.time_scale = 2.0;
+                params.target_time_scale = 0.05;
+                params.is_animating_time = true;
+            }
+            ui.separator();
+            
+            ui.checkbox(&mut params.continuous_mutation, "Continuous Genetic Mutation");
             
             ui.separator();
             
@@ -244,29 +282,29 @@ fn camera_movement(
 fn animate_time_scale(
     mut params: ResMut<SimulationParams>,
     time: Res<Time>,
-    mut last_seed: Local<u32>,
-    mut last_count: Local<usize>,
 ) {
-    let seed_changed = *last_seed != params.spawn_seed;
-    let count_changed = *last_count != params.particle_count;
-    
-    // Re-initialize local tracking if they are 0 (first frame)
-    if *last_seed == 0 && *last_count == 0 {
-        *last_seed = params.spawn_seed;
-        *last_count = params.particle_count;
-        params.time_scale = 2.0;
-    } else if seed_changed || count_changed {
-        *last_seed = params.spawn_seed;
-        *last_count = params.particle_count;
-        params.time_scale = 2.0;
+    if params.is_animating_time {
+        if params.time_scale > params.target_time_scale {
+            params.time_scale -= time.delta_secs() * 0.5;
+            if params.time_scale <= params.target_time_scale {
+                params.time_scale = params.target_time_scale;
+                params.is_animating_time = false;
+            }
+        } else {
+            params.is_animating_time = false;
+        }
     }
-    
-    // Smoothly decay towards 0.05
-    if params.time_scale > 0.05 {
-        // use an exponential decay for a smoother slow-down
-        params.time_scale -= (params.time_scale * 0.5) * time.delta_secs();
-        if params.time_scale < 0.05 {
-            params.time_scale = 0.05;
+
+    // Continuous genetic mutation
+    if params.continuous_mutation {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        // Slightly mutate a few random cells in the interaction matrix each frame
+        for _ in 0..3 {
+            let i = rng.gen_range(0..params.particle_types);
+            let j = rng.gen_range(0..params.particle_types);
+            let drift = rng.gen_range(-0.01..0.01);
+            params.interaction_matrix[i][j] = (params.interaction_matrix[i][j] + drift).clamp(-2.0, 2.0);
         }
     }
 }

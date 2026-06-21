@@ -81,12 +81,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var force = 0.0;
         if (dist < params.min_dist) {
             // Repulsion zone
-            force = (dist / params.min_dist - 1.0) * 2.0;
+            let r = dist / params.min_dist;
+            force = (r - 1.0) * 3.0; // Stronger, clean repulsion
         } else {
             // Interaction zone
             let width = params.interaction_radius - params.min_dist;
-            let midpoint = (params.min_dist + params.interaction_radius) * 0.5;
-            force = attraction * (1.0 - abs(dist - midpoint) / (width * 0.5));
+            let t = (dist - params.min_dist) / width;
+            let PI = 3.14159265359;
+            // Smooth sine bump from 0 up to 1 and down to 0
+            force = attraction * sin(t * PI);
         }
         
         total_force += dir_norm * force * params.attraction_strength;
