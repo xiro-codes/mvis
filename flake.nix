@@ -65,6 +65,7 @@
             inherit nativeBuildInputs buildInputs;
 
             postInstall = ''
+              cp -r assets $out/bin/
               wrapProgram $out/bin/bevy-app \
                 --prefix LD_LIBRARY_PATH : "${makeLibraryPath buildInputs}"
             '';
