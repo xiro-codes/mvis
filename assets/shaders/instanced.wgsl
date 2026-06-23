@@ -24,6 +24,14 @@ struct SimParams {
     scale: f32,
     global_gravity: f32,
     infinite_space: u32,
+    emission_intensity: f32,
+    gravity_wells: u32,
+    gravity_well_radius: f32,
+    gravity_center_well: u32,
+    gravity_well_pattern: u32,
+    _padding1: u32,
+    _padding2: u32,
+    _padding3: u32,
 };
 
 @group(1) @binding(0) var<uniform> params: SimParams;
@@ -76,7 +84,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     
     // Optional: add a slight glow/soft edge
     let alpha = smoothstep(1.0, 0.8, sqrt(dist_sq));
-    let intensity = 1.2; // HDR boost
+    let intensity = params.emission_intensity; // User-controlled HDR boost
     // Pre-multiply RGB with alpha so additive blending correctly fades the edges
     return vec4<f32>(in.color.rgb * in.color.a * alpha * intensity, in.color.a * alpha);
 }

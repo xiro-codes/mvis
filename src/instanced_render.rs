@@ -1,7 +1,9 @@
 use bevy::{
     prelude::*,
     render::{
-        render_graph::{NodeRunError, RenderGraphContext, RenderLabel, RenderGraphExt, ViewNode, ViewNodeRunner},
+        render_graph::{
+            NodeRunError, RenderGraphContext, RenderGraphExt, RenderLabel, ViewNode, ViewNodeRunner,
+        },
         render_resource::*,
         renderer::{RenderContext, RenderDevice},
         view::ViewTarget,
@@ -9,14 +11,14 @@ use bevy::{
     },
 };
 
-use crate::gpu_pipeline::{GpuSimulationParams, PhysicsPipeline, PhysicsRenderBindGroup};
+use crate::gpu_pipeline::{PhysicsPipeline, PhysicsRenderBindGroup};
 
 pub struct InstancedRenderPlugin;
 
 impl Plugin for InstancedRenderPlugin {
     fn build(&self, app: &mut App) {
         let render_app = app.sub_app_mut(RenderApp);
-        
+
         render_app
             .add_render_graph_node::<ViewNodeRunner<InstancedRenderNode>>(
                 bevy::core_pipeline::core_2d::graph::Core2d,
@@ -54,7 +56,7 @@ impl FromWorld for InstancedPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
         let physics_pipeline = world.resource::<PhysicsPipeline>();
-        
+
         let physics_layout = physics_pipeline.render_layout.clone();
 
         let view_layout = render_device.create_bind_group_layout(
@@ -71,7 +73,9 @@ impl FromWorld for InstancedPipeline {
             }],
         );
 
-        let shader = world.resource::<AssetServer>().load("shaders/instanced.wgsl");
+        let shader = world
+            .resource::<AssetServer>()
+            .load("shaders/instanced.wgsl");
         let pipeline_cache = world.resource::<PipelineCache>();
 
         let pipeline_id = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
@@ -123,7 +127,11 @@ impl FromWorld for InstancedPipeline {
             zero_initialize_workgroup_memory: false,
         });
 
-        Self { pipeline_id, physics_layout, view_layout }
+        Self {
+            pipeline_id,
+            physics_layout,
+            view_layout,
+        }
     }
 }
 
@@ -155,10 +163,12 @@ impl ViewNode for InstancedRenderNode {
 
         let params = world.get_resource::<crate::gpu_pipeline::GpuSimulationParams>();
 
-        if let (Some(sim_params), Some(physics_bind_group)) = (params, world.get_resource::<PhysicsRenderBindGroup>()) {
-            if let Some(render_pipeline) = pipeline_cache.get_render_pipeline(pipeline.pipeline_id) {
+        if let (Some(sim_params), Some(physics_bind_group)) =
+            (params, world.get_resource::<PhysicsRenderBindGroup>())
+        {
+            if let Some(render_pipeline) = pipeline_cache.get_render_pipeline(pipeline.pipeline_id)
+            {
                 if let Some(view_binding) = view_uniforms.uniforms.binding() {
-                    
                     let view_bind_group = render_device.create_bind_group(
                         Some("view_bind_group"),
                         &pipeline.view_layout,
@@ -168,8 +178,8 @@ impl ViewNode for InstancedRenderNode {
                         }],
                     );
                     let color_attachment = view_target.get_color_attachment();
-                    let mut render_pass = render_context
-                        .begin_tracked_render_pass(RenderPassDescriptor {
+                    let mut render_pass =
+                        render_context.begin_tracked_render_pass(RenderPassDescriptor {
                             label: Some("instanced_particles_pass"),
                             color_attachments: &[Some(color_attachment)],
                             depth_stencil_attachment: None,
@@ -180,7 +190,7 @@ impl ViewNode for InstancedRenderNode {
                     render_pass.set_render_pipeline(render_pipeline);
                     render_pass.set_bind_group(0, &view_bind_group, &[view_uniform_offset.offset]);
                     render_pass.set_bind_group(1, &physics_bind_group.0, &[]);
-                    
+
                     render_pass.draw(0..6, 0..sim_params.particle_count);
                 }
             }

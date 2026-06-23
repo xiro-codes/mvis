@@ -1,7 +1,4 @@
-use bevy::{
-    prelude::*,
-    render::render_resource::ShaderType,
-};
+use bevy::{prelude::*, render::render_resource::ShaderType};
 use bytemuck::{Pod, Zeroable};
 
 #[derive(Component)]
@@ -27,4 +24,3 @@ pub struct GpuParticle {
     pub kind: u32,
     pub padding: u32,
 }
-
