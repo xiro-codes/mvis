@@ -17,11 +17,16 @@ pub struct MpdClient {
 impl MpdClient {
     pub fn connect(host: &str) -> Option<Self> {
         let stream = TcpStream::connect(host).ok()?;
-        stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-        stream.set_write_timeout(Some(Duration::from_secs(2))).ok()?;
-        
+        // Increased timeout to 10 seconds to handle large album art chunks
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .ok()?;
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .ok()?;
+
         let mut reader = BufReader::new(stream.try_clone().ok()?);
-        
+
         // Read greeting "OK MPD <version>\n"
         let mut greeting = String::new();
         reader.read_line(&mut greeting).ok()?;
@@ -34,7 +39,7 @@ impl MpdClient {
 
     pub fn get_current_song(&mut self) -> Option<SongInfo> {
         self.stream.write_all(b"currentsong\n").ok()?;
-        
+
         let mut title = String::new();
         let mut artist = String::new();
         let mut file = String::new();
@@ -64,50 +69,129 @@ impl MpdClient {
             return None;
         }
 
-        Some(SongInfo { title, artist, file })
+        Some(SongInfo {
+            title,
+            artist,
+            file,
+        })
     }
 
-    pub fn get_album_art(&mut self, uri: &str) -> Option<Vec<u8>> {
-        let cmd = format!("readpicture \"{}\" 0\n", uri);
-        self.stream.write_all(cmd.as_bytes()).ok()?;
-        
-        let mut binary_size = 0;
-        
+    pub fn get_status(&mut self) -> Option<(f32, f32)> {
+        self.stream.write_all(b"status\n").ok()?;
+
+        let mut elapsed = 0.0;
+        let mut duration = 0.0;
+
         loop {
             let mut line = String::new();
             if self.reader.read_line(&mut line).is_err() || line.is_empty() {
                 return None;
             }
             if line.starts_with("OK") {
-                return None; // No picture found
+                break;
             }
             if line.starts_with("ACK") {
                 return None;
             }
-            if let Some(size_str) = line.strip_prefix("binary: ") {
-                binary_size = size_str.trim().parse::<usize>().unwrap_or(0);
-                break;
+
+            if let Some(stripped) = line.strip_prefix("elapsed: ") {
+                elapsed = stripped.trim().parse().unwrap_or(0.0);
+            } else if let Some(stripped) = line.strip_prefix("duration: ") {
+                duration = stripped.trim().parse().unwrap_or(0.0);
+            } else if let Some(stripped) = line.strip_prefix("time: ") {
+                let parts: Vec<&str> = stripped.trim().split(':').collect();
+                if parts.len() == 2 && elapsed == 0.0 && duration == 0.0 {
+                    elapsed = parts[0].parse().unwrap_or(0.0);
+                    duration = parts[1].parse().unwrap_or(0.0);
+                }
             }
         }
 
-        if binary_size == 0 {
-            return None;
-        }
+        Some((elapsed, duration))
+    }
 
-        let mut img_data = vec![0u8; binary_size];
-        self.reader.read_exact(&mut img_data).ok()?;
+    fn fetch_picture(&mut self, cmd_name: &str, uri: &str) -> Option<Vec<u8>> {
+        let mut offset = 0;
+        let mut total_size = None;
+        let mut data = Vec::new();
 
-        // clear out remaining lines up to OK
+        let safe_uri = uri.replace("\"", "\\\"");
+
         loop {
-            let mut line = String::new();
-            if self.reader.read_line(&mut line).is_err() || line.is_empty() {
+            let cmd = format!("{} \"{}\" {}\n", cmd_name, safe_uri, offset);
+            if self.stream.write_all(cmd.as_bytes()).is_err() {
+                return None;
+            }
+
+            let mut chunk_size = 0;
+
+            loop {
+                let mut line = String::new();
+                if self.reader.read_line(&mut line).is_err() || line.is_empty() {
+                    return if data.is_empty() { None } else { Some(data) };
+                }
+                if line.starts_with("OK") {
+                    if chunk_size == 0 {
+                        return if data.is_empty() { None } else { Some(data) };
+                    }
+                    break;
+                }
+                if line.starts_with("ACK") {
+                    return if data.is_empty() { None } else { Some(data) };
+                }
+
+                if let Some(size_str) = line.strip_prefix("size: ") {
+                    total_size = Some(size_str.trim().parse::<usize>().unwrap_or(0));
+                } else if let Some(size_str) = line.strip_prefix("binary: ") {
+                    chunk_size = size_str.trim().parse::<usize>().unwrap_or(0);
+                    break;
+                }
+            }
+
+            if chunk_size == 0 {
                 break;
             }
-            if line.starts_with("OK") || line.starts_with("ACK") {
+
+            let mut chunk_data = vec![0u8; chunk_size];
+            if self.reader.read_exact(&mut chunk_data).is_err() {
+                break;
+            }
+            data.extend_from_slice(&chunk_data);
+
+            // Read until we see "OK"
+            loop {
+                let mut line = String::new();
+                if self.reader.read_line(&mut line).is_err() || line.is_empty() {
+                    break;
+                }
+                if line.starts_with("OK") || line.starts_with("ACK") {
+                    break;
+                }
+            }
+
+            offset += chunk_size;
+
+            if let Some(ts) = total_size {
+                if offset >= ts {
+                    break;
+                }
+            } else {
+                // If total_size wasn't provided, just break (fallback)
                 break;
             }
         }
 
-        Some(img_data)
+        if data.is_empty() {
+            None
+        } else {
+            Some(data)
+        }
+    }
+
+    pub fn get_album_art(&mut self, uri: &str) -> Option<Vec<u8>> {
+        if let Some(data) = self.fetch_picture("readpicture", uri) {
+            return Some(data);
+        }
+        self.fetch_picture("albumart", uri)
     }
 }
