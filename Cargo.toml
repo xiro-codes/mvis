@@ -1,11 +1,12 @@
 [package]
-name = "bevy-app"
+name = "mvis"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 bevy = { version = "0.17", features = ["mp3", "jpeg", "png", "serialize"] }
 bevy_egui = "0.37"
+bevy_live_wallpaper = { version = "0.3.1", features = ["wayland"] }
 bytemuck = { version = "1.25.0", features = ["derive"] }
 clap = { version = "4.6.1", features = ["derive"] }
 crossbeam-channel = "0.5.15"
@@ -14,3 +15,11 @@ rand = "0.8"
 rustfft = "6.4.1"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
+
+[[bin]]
+name = "mvis-wallpaper"
+path = "src/bin/wallpaper.rs"
+
+[[bin]]
+name = "mvis-cli"
+path = "src/bin/cli.rs"

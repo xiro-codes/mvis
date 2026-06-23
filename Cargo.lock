@@ -487,22 +487,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76d3ee8652fe0577fd8a99054e147740850140d530be8e044a9be4e23a3e8a24"
 dependencies = [
  "bevy_internal",
-]
-
-[[package]]
-name = "bevy-app"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bevy_egui",
- "bytemuck",
- "clap",
- "crossbeam-channel",
- "image",
- "rand 0.8.6",
- "rustfft",
- "serde",
- "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -612,6 +597,7 @@ dependencies = [
  "downcast-rs 2.0.2",
  "log",
  "thiserror 2.0.18",
+ "tracing",
  "variadics_please",
  "wasm-bindgen",
  "web-sys",
@@ -812,6 +798,7 @@ dependencies = [
  "slotmap",
  "smallvec",
  "thiserror 2.0.18",
+ "tracing",
  "variadics_please",
 ]
 
@@ -1112,6 +1099,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_live_wallpaper"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbecb95e6ac5da94b5e6931ba5147d31af2fc72a5a177c0911a3e3b894bec46a"
+dependencies = [
+ "bevy",
+ "raw-window-handle",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "wgpu",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "bevy_log"
 version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1123,6 +1126,7 @@ dependencies = [
  "bevy_platform",
  "bevy_utils",
  "tracing",
+ "tracing-error",
  "tracing-log",
  "tracing-oslog",
  "tracing-subscriber",
@@ -1392,6 +1396,7 @@ dependencies = [
  "naga",
  "nonmax",
  "offset-allocator",
+ "profiling",
  "send_wrapper",
  "smallvec",
  "thiserror 2.0.18",
@@ -3764,6 +3769,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "mvis"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_egui",
+ "bevy_live_wallpaper",
+ "bytemuck",
+ "clap",
+ "crossbeam-channel",
+ "image",
+ "rand 0.8.6",
+ "rustfft",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "naga"
 version = "26.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4624,6 +4646,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 dependencies = [
  "profiling-procmacros",
+ "tracing",
 ]
 
 [[package]]
@@ -5708,6 +5731,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-error"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b1581020d7a273442f5b45074a6a57d5757ad0a47dac0e9f0bd57b81936f3db"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tracing-log"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6229,12 +6262,14 @@ dependencies = [
  "js-sys",
  "log",
  "naga",
+ "parking_lot",
  "portable-atomic",
  "profiling",
  "raw-window-handle",
  "smallvec",
  "static_assertions",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
  "wgpu-core",
  "wgpu-hal",
@@ -6266,6 +6301,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.18",
  "wgpu-core-deps-apple",
+ "wgpu-core-deps-emscripten",
  "wgpu-core-deps-wasm",
  "wgpu-core-deps-windows-linux-android",
  "wgpu-hal",
@@ -6277,6 +6313,15 @@ name = "wgpu-core-deps-apple"
 version = "26.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18ae5fbde6a4cbebae38358aa73fcd6e0f15c6144b67ef5dc91ded0db125dbdf"
+dependencies = [
+ "wgpu-hal",
+]
+
+[[package]]
+name = "wgpu-core-deps-emscripten"
+version = "26.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7670e390f416006f746b4600fdd9136455e3627f5bd763abf9a65daa216dd2d"
 dependencies = [
  "wgpu-hal",
 ]
