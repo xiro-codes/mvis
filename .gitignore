@@ -23,3 +23,6 @@ migrate_working_dir/
 .crush
 /target
 /result
+
+# SOFA
+.sofa/

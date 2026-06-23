@@ -55,7 +55,7 @@
         {
           formatter = pkgs.nixfmt;
           packages.default = pkgsWithRust.rustPlatform.buildRustPackage {
-            pname = "bevy-app";
+            pname = "mvis";
             version = "0.1.0";
             src = ./.;
             cargoLock = {
@@ -66,7 +66,7 @@
 
             postInstall = ''
               cp -r assets $out/bin/
-              wrapProgram $out/bin/bevy-app \
+              wrapProgram $out/bin/mvis \
                 --prefix LD_LIBRARY_PATH : "${makeLibraryPath buildInputs}"
             '';
           };
