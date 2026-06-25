@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use mvis::params::{AnimateSource, GravityWellPattern};
 use rand::Rng;
 use std::fs;
@@ -42,6 +42,15 @@ enum Commands {
     Unlock { key: String },
     /// Randomize all unlocked simulation parameters
     Randomize,
+    /// List all simulation parameters
+    List,
+    /// Get the current value of a parameter
+    Get { key: String },
+    /// Generate shell completions
+    GenerateCompletion {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     /// Manage parameter presets
     Preset {
         #[command(subcommand)]
@@ -63,6 +72,48 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::GenerateCompletion { shell } => {
+            let mut cmd = Cli::command();
+            let name = cmd.get_name().to_string();
+            clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
+        }
+        Commands::List => {
+            let app_config = mvis::config::AppConfig::load_or_create();
+            println!("--- Float Parameters ---");
+            for param in mvis::params::FloatParam::all() {
+                let meta = param.meta();
+                let val = param.get_val(&app_config.simulation);
+                let anim = param.get_anim_source(&app_config.simulation);
+                let inv = param.get_invert(&app_config.simulation);
+                let locked = app_config.simulation.locked_parameters.contains(&meta.id.to_string());
+                println!("{}: {} (Range: {:.2}..{:.2}) [Locked: {}, Anim: {:?}, Invert: {}]", 
+                         meta.id, val, meta.slider_range.start(), meta.slider_range.end(), locked, anim, inv);
+            }
+            println!("--- Other Parameters ---");
+            println!("gravity_wells: {}", app_config.simulation.gravity_wells);
+            println!("gravity_center_well: {}", app_config.simulation.gravity_center_well);
+            println!("gravity_well_pattern: {:?}", app_config.simulation.gravity_well_pattern);
+            println!("spawn_seed: {}", app_config.simulation.spawn_seed);
+        }
+        Commands::Get { key } => {
+            let app_config = mvis::config::AppConfig::load_or_create();
+            
+            if let Some(param) = mvis::params::FloatParam::all().into_iter().find(|p| p.meta().id == key) {
+                println!("{}", param.get_val(&app_config.simulation));
+                return;
+            }
+            
+            match key.as_str() {
+                "gravity_wells" => println!("{}", app_config.simulation.gravity_wells),
+                "gravity_center_well" => println!("{}", app_config.simulation.gravity_center_well),
+                "gravity_well_pattern" => println!("{:?}", app_config.simulation.gravity_well_pattern),
+                "spawn_seed" => println!("{}", app_config.simulation.spawn_seed),
+                _ => {
+                    eprintln!("Error: Parameter '{}' not found.", key);
+                    std::process::exit(1);
+                }
+            }
+        }
         Commands::Preset { action } => match action {
             PresetAction::List => {
                 let presets = mvis::config::AppConfig::list_presets();
