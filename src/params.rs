@@ -84,9 +84,11 @@ macro_rules! define_simulation_params {
     ) => {
         paste::paste! {
             #[derive(Clone, serde::Serialize, serde::Deserialize)]
+            #[serde(default)]
             pub struct GeneratedParams {
                 $( pub $field: f32, )*
                 $( pub [<animate_ $field>]: crate::params::AnimateSource, )*
+                $( pub [<invert_ $field>]: bool, )*
             }
 
             impl Default for GeneratedParams {
@@ -94,6 +96,7 @@ macro_rules! define_simulation_params {
                     Self {
                         $( $field: $default, )*
                         $( [<animate_ $field>]: $anim_default, )*
+                        $( [<invert_ $field>]: false, )*
                     }
                 }
             }
@@ -106,6 +109,9 @@ macro_rules! define_simulation_params {
                     
                     #[arg(long, help = concat!("Audio animation source for ", stringify!($name)))]
                     pub [<animate_ $field>]: Option<String>,
+
+                    #[arg(long, help = concat!("Invert audio animation for ", stringify!($name)))]
+                    pub [<invert_ $field>]: Option<bool>,
                 )*
             }
 
@@ -155,6 +161,18 @@ macro_rules! define_simulation_params {
                         $( Self::[<$field:camel>] => p.generated.[<animate_ $field>] = source, )*
                     }
                 }
+
+                pub fn get_invert(&self, p: &crate::params::SimulationParams) -> bool {
+                    match self {
+                        $( Self::[<$field:camel>] => p.generated.[<invert_ $field>], )*
+                    }
+                }
+
+                pub fn set_invert(&self, p: &mut crate::params::SimulationParams, invert: bool) {
+                    match self {
+                        $( Self::[<$field:camel>] => p.generated.[<invert_ $field>] = invert, )*
+                    }
+                }
             }
             
             impl GeneratedParams {
@@ -162,6 +180,9 @@ macro_rules! define_simulation_params {
                     $(
                         if let Some(val) = cli.$field {
                             self.$field = val;
+                        }
+                        if let Some(val) = cli.[<invert_ $field>] {
+                            self.[<invert_ $field>] = val;
                         }
                         /* Needs parser logic for AnimateSource */
                     )*
@@ -361,47 +382,42 @@ pub struct SimulationParams {
 impl Default for SimulationParams {
     fn default() -> Self {
         let colors = [
-            Color::srgba(0.0, 0.0, 0.003921568859368563, 1.0),
-            Color::srgba(0.3450980484485626, 0.3176470696926117, 0.027450980618596077, 1.0),
-            Color::srgba(0.8313725590705872, 0.7058823704719543, 0.10588235408067703, 1.0),
-            Color::srgba(0.18039216101169586, 0.062745101749897, 0.29411765933036804, 1.0),
-            Color::srgba(0.5529412031173706, 0.4745098054409027, 0.1764705926179886, 1.0),
-            Color::srgba(0.33725491166114807, 0.2705882489681244, 0.4941176474094391, 1.0),
-            Color::srgba(0.6078431606292725, 0.5411764979362488, 0.7764706015586853, 1.0),
-            Color::srgba(0.7960784435272217, 0.7607843279838562, 0.8745098114013672, 1.0),
-            Color::srgba(0.4745098054409027, 0.4313725531101227, 0.5960784554481506, 1.0),
-            Color::srgba(0.10588235408067703, 0.10588235408067703, 0.10980392247438431, 1.0),
+            Color::srgba(0.07450980693101883, 0.04313725605607033, 0.0, 1.0),
+            Color::srgba(0.658823549747467, 0.364705890417099, 0.003921568859368563, 1.0),
+            Color::srgba(0.9215686321258545, 0.6117647290229797, 0.027450980618596077, 1.0),
+            Color::srgba(0.3529411852359772, 0.239215686917305, 0.09803921729326248, 1.0),
+            Color::srgba(0.7372549176216125, 0.5529412031173706, 0.30588236451148987, 1.0),
+            Color::srgba(0.9333333373069763, 0.7647058963775635, 0.4431372582912445, 1.0),
+            Color::srgba(0.9960784316062927, 0.9254902005195618, 0.7843137383460999, 1.0),
+            Color::srgba(0.5607843399047852, 0.48235294222831726, 0.1764705926179886, 1.0),
+            Color::srgba(0.4156862795352936, 0.3490196168422699, 0.27843138575553894, 1.0),
+            Color::srgba(0.95686274766922, 0.8078431487083435, 0.13333334028720856, 1.0),
         ];
 
         let interaction_matrix = [
-            [ 0.36746087670326233, 0.5923157930374146, 0.19599111378192902, -0.0016689160838723183, -0.1318061649799347, 0.9716295003890991, -0.8917920589447021, -0.10412275791168213, -0.9412205219268799, -0.9220917224884033 ],
-            [ 0.03154454752802849, 0.22886747121810913, -1.258409023284912, 0.4010147750377655, 0.534250795841217, 0.08655649423599243, -0.2068861722946167, -0.951228141784668, 0.06904327869415283, -0.5543262362480164 ],
-            [ -0.34359216690063477, 0.14847570657730103, 0.12894225120544434, 0.7316543459892273, 0.5942926406860352, 0.26411014795303345, -0.2729946970939636, 0.8046836853027344, 0.5259115695953369, -0.7210686206817627 ],
-            [ 0.8169270157814026, -0.33928602933883667, -0.5783749222755432, -0.5593540668487549, -0.3831753730773926, -0.46698787808418274, 0.18511545658111572, -0.31009453535079956, -0.08018958568572998, 0.2572082281112671 ],
-            [ -0.14619778096675873, -0.680194616317749, 0.429594486951828, -0.5018467903137207, 0.1693573147058487, -1.0741091966629028, 0.329922080039978, 0.1684778928756714, 0.6303567886352539, -0.10405576229095459 ],
-            [ 0.9689998030662537, 0.9269834756851196, 0.24940870702266693, -0.6748055815696716, 0.22176654636859894, -0.8136312961578369, 0.8680984973907471, -0.5022386908531189, -0.7711994647979736, 0.8285119533538818 ],
-            [ -0.422264039516449, -0.8836026191711426, -0.8731560707092285, 0.8061394691467285, 0.2592970132827759, 0.5276455879211426, -0.12442886829376221, -0.8750081062316895, -0.7789309024810791, 0.906092643737793 ],
-            [ -0.12043964862823486, -0.11559760570526123, -0.18545424938201904, 0.07371556758880615, -0.510011613368988, 0.5816385746002197, 0.2186356782913208, -0.5109104514122009, -0.3559498190879822, -0.2350989580154419 ],
-            [ 0.9820497035980225, -0.6847898960113525, 0.17075049877166748, -0.77427077293396, 0.15587151050567627, 0.5507144927978516, 0.8404436111450195, -0.7104218006134033, -0.17552459239959717, 0.30497705936431885 ],
-            [ 0.5557210445404053, -0.9692506790161133, 0.2614020109176636, 0.6928122043609619, 0.9845166206359863, -0.8143484592437744, 0.1198500394821167, 0.6430087089538574, -0.5416387915611267, -0.9148659706115723 ]
+            [ -0.4584639072418213, -0.26592040061950684, -0.16838450729846954, 0.40076443552970886, -0.8251513838768005, 0.7145001292228699, 0.2743682265281677, 0.6413748264312744, 0.934380054473877, -0.9984729290008545 ],
+            [ -0.02315349504351616, 0.5694538354873657, 0.11004456132650375, -0.5187170505523682, 0.9535415172576904, -1.3105475902557373, 0.9969793558120728, 0.13139666616916656, -0.27138751745224, -0.06906378269195557 ],
+            [ 0.35581398010253906, 0.06696033477783203, 0.3552507162094116, 0.012173337861895561, -0.276632159948349, -0.5142939686775208, 0.6891143918037415, -1.1402267217636108, -0.1361008882522583, -0.29954880475997925 ],
+            [ -1.0644022226333618, -0.34176263213157654, 0.7832526564598083, 0.8229621052742004, -0.45459744334220886, -0.006619784981012344, -0.9471387267112732, 0.5191933512687683, -0.9528546333312988, -0.5340935587882996 ],
+            [ -0.7972061634063721, 1.1859968900680542, -0.9855568408966064, 0.5454855561256409, -0.6463690996170044, -0.47649946808815, -0.05501170828938484, -0.7989727854728699, 0.682081937789917, 0.486641526222229 ],
+            [ -0.6018129587173462, -0.02907242253422737, -0.9045098423957825, 0.7574538588523865, 0.5073769688606262, 0.31334030628204346, 0.04360204562544823, -0.5493527054786682, -0.18629086017608643, 0.5658485889434814 ],
+            [ -0.008477546274662018, 0.8837034106254578, -0.6514148116111755, -0.4928436875343323, 0.6485894918441772, -0.07401032745838165, 0.5064451694488525, -0.7678699493408203, 0.46241486072540283, 0.8257298469543457 ],
+            [ -0.5942475199699402, -0.28762751817703247, 0.9732380509376526, -0.2909482419490814, 1.0253223180770874, -0.5539048314094543, 0.04009367153048515, -0.5375773906707764, 0.5779409408569336, 0.09500014781951904 ],
+            [ 0.9588718414306641, 0.5375478267669678, 0.010481715202331543, -0.40414804220199585, -0.6560637950897217, 0.39263737201690674, -0.7480764389038086, -0.01745474338531494, 0.6105186939239502, -0.32213324308395386 ],
+            [ -0.8824605941772461, 0.36413490772247314, -0.3417190909385681, -0.7885251045227051, -0.617893636226654, 0.09347450733184814, -0.03511250019073486, 0.2689317464828491, -0.8023805618286133, 0.6290018558502197 ]
         ];
 
         let type_proportions = [
-            0.2938831150531769, 1.8068894147872925, 0.31394582986831665, 1.2866599559783936, 1.1281758546829224, 
-            0.3120129108428955, 0.3437986671924591, 0.6369897127151489, 1.1660585403442383, 0.20540815591812134
+            0.46610355377197266, 1.6373518705368042, 0.17504636943340302, 1.3087286949157715, 1.1983627080917358, 
+            0.35313013195991516, 1.167947769165039, 1.3412078619003296, 1.6417570114135742, 0.5637240409851074
         ];
 
         let locked_parameters = vec![
             "gravity_wells".to_string(),
-            "gravity_well_radius".to_string(),
-            "gravity_well_rotation_speed".to_string(),
             "animate_gravity_well_rotation".to_string(),
             "animate_gravity_well_radius".to_string(),
-            "gravity_well_distance_power".to_string(),
             "record_exclusion_zone".to_string(),
-            "record_radius".to_string(),
             "animate_record_radius".to_string(),
-            "record_rotation_speed".to_string(),
             "animate_record_rotation_speed".to_string(),
             "show_mvis_spectrum".to_string(),
             "mvis_spectrum_height".to_string(),
@@ -410,30 +426,102 @@ impl Default for SimulationParams {
             "animate_mvis_bar_thickness".to_string(),
             "animate_mvis_spectrum_height".to_string(),
             "show_debug_visuals".to_string(),
-            "gravity_well_pattern".to_string(),
+            "record_rotation_speed".to_string(),
+            "gravity_well_rotation_speed".to_string(),
+            "gravity_well_distance_power".to_string(),
+            "dampening".to_string(),
         ];
+        
+        let mut generated = GeneratedParams::default();
+        generated.attraction_strength = -162.70590209960938;
+        generated.animate_attraction_strength = crate::params::AnimateSource::Square;
+        generated.invert_attraction_strength = true;
+        
+        generated.dampening = 0.09999999403953552;
+        generated.animate_dampening = crate::params::AnimateSource::LowMid;
+        generated.invert_dampening = false;
+
+        generated.min_dist = 369.6646728515625;
+        generated.animate_min_dist = crate::params::AnimateSource::Sine;
+        generated.invert_min_dist = true;
+
+        generated.interaction_radius = 846.1050415039063;
+        generated.animate_interaction_radius = crate::params::AnimateSource::Mid;
+        generated.invert_interaction_radius = true;
+
+        generated.density_limit = 48.33196258544922;
+        generated.animate_density_limit = crate::params::AnimateSource::Sawtooth;
+        generated.invert_density_limit = true;
+
+        generated.global_gravity = 0.8349452018737793;
+        generated.animate_global_gravity = crate::params::AnimateSource::LowMid;
+        generated.invert_global_gravity = false;
+
+        generated.center_gravity = -0.6869460344314575;
+        generated.animate_center_gravity = crate::params::AnimateSource::HighMid;
+        generated.invert_center_gravity = true;
+
+        generated.time_scale = 1.052954912185669;
+        generated.animate_time_scale = crate::params::AnimateSource::SubBass;
+        generated.invert_time_scale = false;
+
+        generated.animation_speed = 16.891010284423828;
+        generated.animate_animation_speed = crate::params::AnimateSource::Mid;
+        generated.invert_animation_speed = true;
+
+        generated.gravity_well_rotation_speed = 0.5999984741210938;
+        generated.animate_gravity_well_rotation_speed = crate::params::AnimateSource::High;
+        generated.invert_gravity_well_rotation_speed = false;
+
+        generated.gravity_well_distance_power = 1.418257474899292;
+        generated.animate_gravity_well_distance_power = crate::params::AnimateSource::LowMid;
+        generated.invert_gravity_well_distance_power = false;
+
+        generated.gravity_well_radius = 166.8371124267578;
+        generated.animate_gravity_well_radius = crate::params::AnimateSource::Sawtooth;
+        generated.invert_gravity_well_radius = false;
+
+        generated.emission_intensity = 1.6683710813522339;
+        generated.animate_emission_intensity = crate::params::AnimateSource::Sawtooth;
+        generated.invert_emission_intensity = false;
+
+        generated.record_radius = 286.9060363769531;
+        generated.animate_record_radius = crate::params::AnimateSource::Air;
+        generated.invert_record_radius = false;
+
+        generated.record_rotation_speed = 1.0;
+        generated.animate_record_rotation_speed = crate::params::AnimateSource::Off;
+        generated.invert_record_rotation_speed = false;
+
+        generated.mvis_spectrum_height = 100.0;
+        generated.animate_mvis_spectrum_height = crate::params::AnimateSource::Off;
+        generated.invert_mvis_spectrum_height = false;
+
+        generated.mvis_bar_thickness = 3.0;
+        generated.animate_mvis_bar_thickness = crate::params::AnimateSource::Off;
+        generated.invert_mvis_bar_thickness = false;
 
         Self {
-            generated: GeneratedParams::default(),
-            particle_count: 15000,
-            particle_types: 6,
-            region_size: Vec2::new(2560.0, 1080.0),
+            generated,
+            particle_count: 100,
+            particle_types: 8,
+            region_size: Vec2::new(849.0, 505.0),
             scale: 8.0,
             interaction_matrix,
             colors,
             infinite_space: true,
             type_proportions,
-            spawn_seed: 9,
+            spawn_seed: 14,
             continuous_mutation: true,
             is_animating_time: false,
             target_time_scale: 0.05000000074505806,
-            slider_animation_time: 11168.76171875,
+            slider_animation_time: 48085.86328125,
             audio_reactivity_power: 0.25,
             auto_camera: true,
-            gravity_wells: 1,
+            gravity_wells: 50,
             gravity_center_well: true,
-            gravity_well_pattern: GravityWellPattern::Grid,
-            gravity_well_rotation: 3079.54541015625,
+            gravity_well_pattern: GravityWellPattern::Ring,
+            gravity_well_rotation: 3887.22265625,
             disable_wallpaper_colors: true,
             lock_rules: false,
             lock_environment: false,
@@ -444,7 +532,7 @@ impl Default for SimulationParams {
             mouse_pos: Vec2::ZERO,
             target_mouse_pos: Vec2::ZERO,
             follow_mouse: false,
-            show_debug_visuals: true,
+            show_debug_visuals: false,
             record_exclusion_zone: true,
             show_mvis_spectrum: true,
             mvis_repeat_count: 3,
@@ -452,8 +540,8 @@ impl Default for SimulationParams {
             music_info_anchor: MusicInfoAnchor::BottomLeft,
             music_info_padding: Vec2::new(20.0, 20.0),
             locked_parameters,
-            smoothed_parameters: Vec::new(),
-            smoothing_strength: 0.8,
+            smoothed_parameters: vec!["record_radius".to_string()],
+            smoothing_strength: 0.800000011920929,
             smoothed_audio_energy: 0.0,
         }
     }

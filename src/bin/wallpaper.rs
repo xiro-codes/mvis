@@ -95,11 +95,11 @@ fn lock_toggle(ui: &mut egui::Ui, params: &mut SimulationParams, key: &str) {
 fn param_row_ui(ui: &mut egui::Ui, params: &mut SimulationParams, param: mvis::params::FloatParam) {
     let meta = param.meta();
     
-    // Lock and Smooth toggle
+    // Lock, Smooth and Invert toggles
     ui.horizontal(|ui| {
         let mut is_locked = params.locked_parameters.iter().any(|x| x == meta.id);
         let lock_text = if is_locked { "🔒" } else { "🔓" };
-        if ui.toggle_value(&mut is_locked, lock_text).changed() {
+        if ui.toggle_value(&mut is_locked, lock_text).on_hover_text("Lock Parameter").changed() {
             if is_locked {
                 params.locked_parameters.push(meta.id.to_string());
             } else {
@@ -115,6 +115,12 @@ fn param_row_ui(ui: &mut egui::Ui, params: &mut SimulationParams, param: mvis::p
             } else {
                 params.smoothed_parameters.retain(|x| x != meta.id);
             }
+        }
+        
+        let mut invert = param.get_invert(params);
+        let invert_text = if invert { "📉" } else { "📈" };
+        if ui.toggle_value(&mut invert, invert_text).on_hover_text("Invert Wave").changed() {
+            param.set_invert(params, invert);
         }
     });
 
@@ -134,7 +140,7 @@ fn param_row_ui(ui: &mut egui::Ui, params: &mut SimulationParams, param: mvis::p
     
     ui.end_row();
 }
-
+//#TODO smells couldnt we cast the enum to a string
 fn animate_selector(ui: &mut egui::Ui, source: &mut AnimateSource) {
     egui::ComboBox::from_id_salt(ui.next_auto_id())
         .selected_text(match *source {
@@ -319,10 +325,18 @@ fn hot_reload_config(
 
 fn update_music_ui_layout(
     params: Res<SimulationParams>,
-    mut root_query: Query<&mut Node, With<MpdRootNode>>,
+    mut commands: Commands,
+    camera_query: Query<Entity, With<Camera>>,
+    mut root_query: Query<(Entity, &mut Node, Option<&UiTargetCamera>), With<MpdRootNode>>,
     mut text_query: Query<&mut TextLayout, With<MpdTextNode>>,
 ) {
-    if let Ok(mut node) = root_query.single_mut() {
+    if let Ok((entity, mut node, target_camera)) = root_query.single_mut() {
+        if target_camera.is_none() {
+            if let Ok(camera_entity) = camera_query.single() {
+                commands.entity(entity).insert(UiTargetCamera(camera_entity));
+            }
+        }
+
         let pad_x = Val::Px(params.music_info_padding.x);
         let pad_y = Val::Px(params.music_info_padding.y);
 
@@ -415,6 +429,8 @@ fn ui_system(
     mpd_config: Res<config::MpdConfig>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     app_mode: Res<AppMode>,
+    mut preset_name_input: Local<String>,
+    mut selected_preset: Local<String>,
 ) {
     if !app_mode.windowed {
         return; // Disable menu in wallpaper mode
@@ -442,6 +458,8 @@ fn ui_system(
             });
             ui.separator();
 
+            draw_presets_panel(ui, &mut params, &mpd_config, &mut preset_name_input, &mut selected_preset);
+
             draw_global_rules_panel(ui, &mut params);
             draw_visual_effects_panel(ui, &mut params);
             draw_physics_panel(ui, &mut params);
@@ -450,6 +468,55 @@ fn ui_system(
             draw_type_proportions_panel(ui, &mut params);
         });
     }
+}
+
+fn draw_presets_panel(
+    ui: &mut egui::Ui,
+    params: &mut SimulationParams,
+    mpd_config: &config::MpdConfig,
+    preset_name_input: &mut String,
+    selected_preset: &mut String,
+) {
+    ui.collapsing("Presets", |ui| {
+        let presets = config::AppConfig::list_presets();
+
+        ui.horizontal(|ui| {
+            ui.label("Load Preset:");
+            egui::ComboBox::from_id_salt("load_preset_combo")
+                .selected_text(selected_preset.as_str())
+                .show_ui(ui, |ui| {
+                    for preset in &presets {
+                        ui.selectable_value(selected_preset, preset.clone(), preset);
+                    }
+                });
+
+            if ui.button("Load").clicked() && !selected_preset.is_empty() {
+                if let Some(loaded_config) = config::AppConfig::load_preset(selected_preset) {
+                    *params = loaded_config.simulation;
+                    // Automatically save to config.toml so it's the active config
+                    let new_active_config = config::AppConfig {
+                        simulation: params.clone(),
+                        mpd: mpd_config.clone(),
+                    };
+                    new_active_config.save();
+                }
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Save Preset:");
+            ui.text_edit_singleline(preset_name_input);
+            if ui.button("Save").clicked() && !preset_name_input.is_empty() {
+                let app_config = config::AppConfig {
+                    simulation: params.clone(),
+                    mpd: mpd_config.clone(),
+                };
+                app_config.save_preset(preset_name_input);
+                *selected_preset = preset_name_input.clone();
+                preset_name_input.clear();
+            }
+        });
+    });
 }
 
 fn draw_environment_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
@@ -704,6 +771,7 @@ fn draw_global_rules_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
                         ];
                         let idx = rng.gen_range(0..sources.len());
                         param.set_anim_source(params, sources[idx]);
+                        param.set_invert(params, rng.gen_bool(0.5));
                     }
                 }
             }
@@ -1239,7 +1307,7 @@ fn apply_animations(
         params.smoothed_audio_energy -= params.smoothed_audio_energy * (2.0 * dt).min(1.0);
     }
 
-    let mut reactivity = params.audio_reactivity_power;
+    let reactivity = params.audio_reactivity_power;
 
     if params.animation_speed > 0.0 {
         params.slider_animation_time += time_advance * params.animation_speed;
@@ -1279,13 +1347,26 @@ fn apply_animations(
     for param in mvis::params::FloatParam::all() {
         let meta = param.meta();
         let source = param.get_anim_source(&params);
-        if let Some(v) = get_band(source) {
+        if let Some(mut v) = get_band(source) {
             let min = *meta.slider_range.start();
             let max = *meta.slider_range.end();
-            let center = if min < 0.0 && max > 0.0 { 0.0 } else { min };
+            let is_centered = min < 0.0 && max > 0.0;
+            let invert = param.get_invert(&params);
             
-            // Map v from center to max
-            let target = (center + (v * reactivity) * (max - center)).clamp(min, max);
+            let center = if is_centered {
+                0.0
+            } else if invert {
+                max
+            } else {
+                min
+            };
+            
+            if invert {
+                v = -v;
+            }
+            
+            let extent = if v >= 0.0 { max - center } else { center - min };
+            let target = (center + (v * reactivity) * extent).clamp(min, max);
             
             if !params.locked_parameters.contains(&meta.id.to_string()) {
                 if params.smoothed_parameters.contains(&meta.id.to_string()) {

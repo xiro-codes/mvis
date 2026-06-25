@@ -42,12 +42,54 @@ enum Commands {
     Unlock { key: String },
     /// Randomize all unlocked simulation parameters
     Randomize,
+    /// Manage parameter presets
+    Preset {
+        #[command(subcommand)]
+        action: PresetAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PresetAction {
+    /// List available presets
+    List,
+    /// Save current configuration as a preset
+    Save { name: String },
+    /// Load a preset into the active configuration
+    Load { name: String },
 }
 
 fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Preset { action } => match action {
+            PresetAction::List => {
+                let presets = mvis::config::AppConfig::list_presets();
+                if presets.is_empty() {
+                    println!("No presets found. Save one using 'mvis preset save <name>'.");
+                } else {
+                    println!("Available presets:");
+                    for preset in presets {
+                        println!("  - {}", preset);
+                    }
+                }
+            }
+            PresetAction::Save { name } => {
+                let app_config = mvis::config::AppConfig::load_or_create();
+                app_config.save_preset(&name);
+                println!("Saved current configuration as preset '{}'.", name);
+            }
+            PresetAction::Load { name } => {
+                if let Some(loaded_config) = mvis::config::AppConfig::load_preset(&name) {
+                    loaded_config.save();
+                    println!("Loaded preset '{}' as the active configuration.", name);
+                } else {
+                    eprintln!("Error: Preset '{}' not found.", name);
+                    std::process::exit(1);
+                }
+            }
+        },
         Commands::Set { key, value } => {
             let config_dir = get_config_dir();
             let config_path = config_dir.join("config.toml");
@@ -204,6 +246,7 @@ fn main() {
                     ];
                     let idx = rng.gen_range(0..sources.len());
                     param.set_anim_source(&mut app_config.simulation, sources[idx]);
+                    param.set_invert(&mut app_config.simulation, rng.gen_bool(0.5));
                 }
             }
 

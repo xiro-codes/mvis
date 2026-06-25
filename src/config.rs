@@ -84,4 +84,45 @@ impl AppConfig {
             let _ = fs::write(&config_path, toml_str);
         }
     }
+
+    pub fn get_presets_dir() -> PathBuf {
+        let presets_dir = get_config_dir().join("presets");
+        if !presets_dir.exists() {
+            let _ = fs::create_dir_all(&presets_dir);
+        }
+        presets_dir
+    }
+
+    pub fn list_presets() -> Vec<String> {
+        let presets_dir = Self::get_presets_dir();
+        let mut presets = Vec::new();
+        if let Ok(entries) = fs::read_dir(presets_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        presets.push(stem.to_string());
+                    }
+                }
+            }
+        }
+        presets.sort();
+        presets
+    }
+
+    pub fn load_preset(name: &str) -> Option<Self> {
+        let preset_path = Self::get_presets_dir().join(format!("{}.toml", name));
+        if let Ok(content) = fs::read_to_string(&preset_path) {
+            toml::from_str(&content).ok()
+        } else {
+            None
+        }
+    }
+
+    pub fn save_preset(&self, name: &str) {
+        let preset_path = Self::get_presets_dir().join(format!("{}.toml", name));
+        if let Ok(toml_str) = toml::to_string_pretty(self) {
+            let _ = fs::write(&preset_path, toml_str);
+        }
+    }
 }
