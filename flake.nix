@@ -32,6 +32,7 @@
           nativeBuildInputs = with pkgsWithRust; [
             pkg-config
             makeWrapper
+            installShellFiles
           ];
           buildInputs = with pkgsWithRust; [
             udev
@@ -66,6 +67,16 @@
 
             postInstall = ''
               cp -r assets $out/bin/ || true
+
+              # Generate and install shell completions
+              $out/bin/mvis-cli generate-completion bash > mvis-cli.bash
+              $out/bin/mvis-cli generate-completion zsh > mvis-cli.zsh
+              $out/bin/mvis-cli generate-completion fish > mvis-cli.fish
+
+              installShellCompletion mvis-cli.bash
+              installShellCompletion --zsh mvis-cli.zsh
+              installShellCompletion --fish mvis-cli.fish
+
               wrapProgram $out/bin/mvis-wallpaper \
                 --prefix LD_LIBRARY_PATH : "${makeLibraryPath buildInputs}"
               wrapProgram $out/bin/mvis-cli \
