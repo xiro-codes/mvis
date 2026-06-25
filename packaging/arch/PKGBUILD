@@ -1,0 +1,67 @@
+# Maintainer: Travis Davis <pkgs@tdavis.dev>
+
+pkgname=mvis-git
+pkgver=0.1.0.r0.g1234567 # Will be updated by pkgver()
+pkgrel=1
+pkgdesc="An audio-reactive, high-performance live wallpaper and Particle Life simulation"
+arch=('x86_64')
+url="https://github.com/xiro-codes/mvis"
+license=('MIT')
+depends=('alsa-lib' 'vulkan-icd-loader' 'wayland' 'libxkbcommon')
+makedepends=('cargo' 'git')
+optdepends=('mpd: Required for live audio reactivity'
+            'mpc: Required for controlling MPD via CLI')
+provides=('mvis')
+conflicts=('mvis')
+source=("git+https://github.com/xiro-codes/mvis.git")
+md5sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/mvis"
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+  cd "$srcdir/mvis"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$srcdir/mvis"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+  
+  # Generate completions
+  ./target/release/mvis-cli generate-completion bash > mvis-cli.bash
+  ./target/release/mvis-cli generate-completion zsh > mvis-cli.zsh
+  ./target/release/mvis-cli generate-completion fish > mvis-cli.fish
+}
+
+check() {
+  cd "$srcdir/mvis"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo test --frozen
+}
+
+package() {
+  cd "$srcdir/mvis"
+  
+  # Install binaries
+  install -Dm755 target/release/mvis-wallpaper -t "$pkgdir/usr/bin/"
+  install -Dm755 target/release/mvis-cli -t "$pkgdir/usr/bin/"
+  
+  # Install assets. Assuming assets need to be adjacent to binaries
+  # or accessed via a specific path. We copy them to /usr/share/mvis
+  # and symlink to bin if required, but standard approach for bevy
+  # usually expects assets in the working directory. If your code expects
+  # them relative to the executable, we can place them alongside it.
+  mkdir -p "$pkgdir/usr/bin/assets"
+  cp -r assets/* "$pkgdir/usr/bin/assets/"
+  
+  # Install shell completions
+  install -Dm644 mvis-cli.bash "$pkgdir/usr/share/bash-completion/completions/mvis-cli"
+  install -Dm644 mvis-cli.zsh "$pkgdir/usr/share/zsh/site-functions/_mvis-cli"
+  install -Dm644 mvis-cli.fish "$pkgdir/usr/share/fish/vendor_completions.d/mvis-cli.fish"
+}
