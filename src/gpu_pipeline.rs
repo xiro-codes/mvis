@@ -86,6 +86,10 @@ pub struct GpuSimulationParams {
     pub record_exclusion_zone: u32,
     pub record_radius: f32,
     pub spawn_seed: u32,
+    pub center_gravity: f32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
 }
 
 impl Default for GpuSimulationParams {
@@ -116,6 +120,10 @@ impl Default for GpuSimulationParams {
             record_exclusion_zone: 0,
             record_radius: 0.0,
             spawn_seed: 0,
+            center_gravity: 0.0,
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
         }
     }
 }
@@ -141,21 +149,21 @@ pub fn update_gpu_params(
 
     gpu_params.interaction_matrix = flat;
     gpu_params.colors = colors;
-    gpu_params.attraction_strength = params.attraction_strength;
-    gpu_params.time_scale = params.time_scale;
-    gpu_params.min_dist = params.min_dist;
-    gpu_params.interaction_radius = params.interaction_radius;
-    gpu_params.density_limit = params.density_limit;
-    gpu_params.dampening = params.dampening;
+    gpu_params.attraction_strength = params.generated.attraction_strength;
+    gpu_params.time_scale = params.generated.time_scale;
+    gpu_params.min_dist = params.generated.min_dist;
+    gpu_params.interaction_radius = params.generated.interaction_radius;
+    gpu_params.density_limit = params.generated.density_limit;
+    gpu_params.dampening = params.generated.dampening;
     gpu_params.particle_count = params.particle_count as u32;
     gpu_params.region_size_x = params.region_size.x;
     gpu_params.region_size_y = params.region_size.y;
     gpu_params.scale = params.scale;
-    gpu_params.global_gravity = params.global_gravity;
+    gpu_params.global_gravity = params.generated.global_gravity;
     gpu_params.infinite_space = if params.infinite_space { 1 } else { 0 };
-    gpu_params.emission_intensity = params.emission_intensity;
+    gpu_params.emission_intensity = params.generated.emission_intensity;
     gpu_params.gravity_wells = params.gravity_wells;
-    gpu_params.gravity_well_radius = params.gravity_well_radius;
+    gpu_params.gravity_well_radius = params.generated.gravity_well_radius;
     gpu_params.gravity_center_well = if params.gravity_center_well { 1 } else { 0 };
     gpu_params.gravity_well_pattern = match params.gravity_well_pattern {
         crate::params::GravityWellPattern::None => 0,
@@ -169,10 +177,11 @@ pub fn update_gpu_params(
     };
     gpu_params.gravity_well_rotation = params.gravity_well_rotation;
     gpu_params.mouse_pos = params.mouse_pos;
-    gpu_params.gravity_well_distance_power = params.gravity_well_distance_power;
+    gpu_params.gravity_well_distance_power = params.generated.gravity_well_distance_power;
     gpu_params.record_exclusion_zone = if params.record_exclusion_zone { 1 } else { 0 };
-    gpu_params.record_radius = params.record_radius;
+    gpu_params.record_radius = params.generated.record_radius;
     gpu_params.spawn_seed = params.spawn_seed;
+    gpu_params.center_gravity = params.generated.center_gravity;
 }
 
 #[derive(Resource)]

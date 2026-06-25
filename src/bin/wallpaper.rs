@@ -41,6 +41,10 @@ struct Cli {
     debug: bool,
     #[arg(long)]
     windowed: bool,
+    #[arg(long)]
+    width: Option<f32>,
+    #[arg(long)]
+    height: Option<f32>,
 }
 
 #[derive(Resource)]
@@ -75,15 +79,60 @@ struct MpdTextNode;
 struct MpdRootNode;
 
 fn lock_toggle(ui: &mut egui::Ui, params: &mut SimulationParams, key: &str) {
-    let mut is_locked = params.locked_parameters.iter().any(|x| x == key);
-    let text = if is_locked { "🔒" } else { "🔓" };
-    if ui.toggle_value(&mut is_locked, text).changed() {
-        if is_locked {
-            params.locked_parameters.push(key.to_string());
-        } else {
-            params.locked_parameters.retain(|x| x != key);
+    ui.horizontal(|ui| {
+        let mut is_locked = params.locked_parameters.iter().any(|x| x == key);
+        let lock_text = if is_locked { "🔒" } else { "🔓" };
+        if ui.toggle_value(&mut is_locked, lock_text).changed() {
+            if is_locked {
+                params.locked_parameters.push(key.to_string());
+            } else {
+                params.locked_parameters.retain(|x| x != key);
+            }
         }
+    });
+}
+
+fn param_row_ui(ui: &mut egui::Ui, params: &mut SimulationParams, param: mvis::params::FloatParam) {
+    let meta = param.meta();
+    
+    // Lock and Smooth toggle
+    ui.horizontal(|ui| {
+        let mut is_locked = params.locked_parameters.iter().any(|x| x == meta.id);
+        let lock_text = if is_locked { "🔒" } else { "🔓" };
+        if ui.toggle_value(&mut is_locked, lock_text).changed() {
+            if is_locked {
+                params.locked_parameters.push(meta.id.to_string());
+            } else {
+                params.locked_parameters.retain(|x| x != meta.id);
+            }
+        }
+
+        let mut is_smoothed = params.smoothed_parameters.iter().any(|x| x == meta.id);
+        let smooth_text = if is_smoothed { "🌊" } else { "〰" };
+        if ui.toggle_value(&mut is_smoothed, smooth_text).on_hover_text("Smooth Animations").changed() {
+            if is_smoothed {
+                params.smoothed_parameters.push(meta.id.to_string());
+            } else {
+                params.smoothed_parameters.retain(|x| x != meta.id);
+            }
+        }
+    });
+
+    ui.label(meta.name);
+
+    let mut source = param.get_anim_source(params);
+    let original_source = source;
+    animate_selector(ui, &mut source);
+    if source != original_source {
+        param.set_anim_source(params, source);
     }
+
+    let mut val = param.get_val(params);
+    if normalized_slider_f32(ui, &mut val, meta.slider_range.clone()).changed() {
+        param.set_val(params, val);
+    }
+    
+    ui.end_row();
 }
 
 fn animate_selector(ui: &mut egui::Ui, source: &mut AnimateSource) {
@@ -124,6 +173,13 @@ fn main() {
     let app_config = config::AppConfig::load_or_create();
     let mut sim_params = app_config.simulation.clone();
 
+    if let Some(w) = cli.width {
+        sim_params.region_size.x = w;
+    }
+    if let Some(h) = cli.height {
+        sim_params.region_size.y = h;
+    }
+
     // Toggle UI controls based on windowed mode
     sim_params.show_ui_menu = cli.windowed;
 
@@ -154,6 +210,10 @@ fn main() {
         app.add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "mvis".to_string(),
+                resolution: bevy::window::WindowResolution::new(
+                    sim_params.region_size.x as u32,
+                    sim_params.region_size.y as u32,
+                ),
                 ..default()
             }),
             ..default()
@@ -431,47 +491,12 @@ fn draw_physics_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
             .num_columns(4)
             .spacing([10.0, 4.0])
             .show(ui, |ui| {
-                lock_toggle(ui, params, "time_scale");
-                ui.label("Time Scale");
-                animate_selector(ui, &mut params.animate_time_scale);
-                normalized_slider_f32(ui, &mut params.time_scale, -1.0..=1.0);
-                ui.end_row();
-
-                lock_toggle(ui, params, "attraction_strength");
-                ui.label("Force Multiplier");
-                animate_selector(ui, &mut params.animate_attraction);
-                normalized_slider_f32(ui, &mut params.attraction_strength, -120.0..=120.0);
-                ui.end_row();
-
-                lock_toggle(ui, params, "dampening");
-                ui.label("Dampening");
-                animate_selector(ui, &mut params.animate_dampening);
-                normalized_slider_f32(ui, &mut params.dampening, 0.8..=1.0);
-                ui.end_row();
-
-                lock_toggle(ui, params, "interaction_radius");
-                ui.label("Interaction Radius");
-                animate_selector(ui, &mut params.animate_interaction_radius);
-                normalized_slider_f32(ui, &mut params.interaction_radius, 50.0..=300.0);
-                ui.end_row();
-
-                lock_toggle(ui, params, "min_dist");
-                ui.label("Repulsion Radius");
-                animate_selector(ui, &mut params.animate_min_dist);
-                normalized_slider_f32(ui, &mut params.min_dist, 5.0..=100.0);
-                ui.end_row();
-
-                lock_toggle(ui, params, "density_limit");
-                ui.label("Density Limit");
-                animate_selector(ui, &mut params.animate_density_limit);
-                normalized_slider_f32(ui, &mut params.density_limit, 0.1..=5.0);
-                ui.end_row();
-
-                lock_toggle(ui, params, "global_gravity");
-                ui.label("Global Gravity");
-                animate_selector(ui, &mut params.animate_global_gravity);
-                normalized_slider_f32(ui, &mut params.global_gravity, -0.5..=0.5);
-                ui.end_row();
+                for param in mvis::params::FloatParam::all() {
+                    let meta = param.meta();
+                    if meta.category == mvis::params::ParamCategory::Physics {
+                        param_row_ui(ui, params, *param);
+                    }
+                }
             });
     });
 }
@@ -505,29 +530,18 @@ fn draw_gravity_wells_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
                 ui.add(egui::Slider::new(&mut params.gravity_wells, 1..=100));
                 ui.end_row();
 
-                lock_toggle(ui, params, "gravity_well_radius");
-                ui.label("Radius/Spacing");
-                animate_selector(ui, &mut params.animate_gravity_well_radius);
-                normalized_slider_f32(ui, &mut params.gravity_well_radius, 0.0..=2000.0);
-                ui.end_row();
-
-                lock_toggle(ui, params, "gravity_well_rotation_speed");
-                ui.label("Rotation Speed");
-                animate_selector(ui, &mut params.animate_gravity_well_rotation);
-                normalized_slider_f32(ui, &mut params.gravity_well_rotation_speed, -5.0..=5.0);
-                ui.end_row();
-
-                lock_toggle(ui, params, "gravity_well_distance_power");
-                ui.label("Outer Well Power Modifier");
-                animate_selector(ui, &mut params.animate_gravity_well_distance_power);
-                normalized_slider_f32(ui, &mut params.gravity_well_distance_power, -5.0..=5.0);
-                ui.end_row();
-
                 ui.label("");
                 ui.label("Include Center Well");
                 ui.label("");
                 ui.checkbox(&mut params.gravity_center_well, "");
                 ui.end_row();
+
+                for param in mvis::params::FloatParam::all() {
+                    let meta = param.meta();
+                    if meta.category == mvis::params::ParamCategory::GravityWells {
+                        param_row_ui(ui, params, *param);
+                    }
+                }
             });
     });
 }
@@ -544,12 +558,6 @@ fn draw_visual_effects_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
                 ui.checkbox(&mut params.disable_wallpaper_colors, "");
                 ui.end_row();
 
-                lock_toggle(ui, params, "emission_intensity");
-                ui.label("Particle Glow Intensity");
-                animate_selector(ui, &mut params.animate_emission_intensity);
-                normalized_slider_f32(ui, &mut params.emission_intensity, 0.1..=10.0);
-                ui.end_row();
-
                 ui.label("");
                 ui.label("Debug Visuals");
                 ui.label("");
@@ -557,15 +565,9 @@ fn draw_visual_effects_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
                 ui.end_row();
 
                 ui.label("");
-                ui.label("Audio Reactivity Power");
+                ui.label("Global Smoothing Strength");
                 ui.label("");
-                normalized_slider_f32(ui, &mut params.audio_reactivity_power, 0.0..=2.0);
-                ui.end_row();
-
-                ui.label("");
-                ui.label("Auto-Animate Speed");
-                animate_selector(ui, &mut params.animate_animation_speed);
-                normalized_slider_f32(ui, &mut params.slider_animation_speed, 0.0..=5.0);
+                ui.add(egui::Slider::new(&mut params.smoothing_strength, 0.0..=0.99));
                 ui.end_row();
 
                 ui.label("");
@@ -580,44 +582,23 @@ fn draw_visual_effects_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
                 ui.checkbox(&mut params.record_exclusion_zone, "");
                 ui.end_row();
 
-                if params.record_exclusion_zone {
-                    ui.label("");
-                    ui.label("Record Radius");
-                    animate_selector(ui, &mut params.animate_record_radius);
-                    normalized_slider_f32(ui, &mut params.record_radius, 50.0..=1000.0);
-                    ui.end_row();
-
-                    ui.label("");
-                    ui.label("Record Rotation Speed");
-                    animate_selector(ui, &mut params.animate_record_rotation_speed);
-                    normalized_slider_f32(ui, &mut params.record_rotation_speed, -10.0..=10.0);
-                    ui.end_row();
-                }
-
                 ui.label("");
-                ui.label("Show osu!mvis Spectrum");
+                ui.label("Show Spectrum");
                 ui.label("");
                 ui.checkbox(&mut params.show_mvis_spectrum, "");
                 ui.end_row();
 
-                if params.show_mvis_spectrum {
-                    ui.label("");
-                    ui.label("Spectrum Height");
-                    animate_selector(ui, &mut params.animate_mvis_spectrum_height);
-                    normalized_slider_f32(ui, &mut params.mvis_spectrum_height, 10.0..=500.0);
-                    ui.end_row();
+                ui.label("");
+                ui.label("Spectrum Multiplier");
+                ui.label("");
+                ui.add(egui::Slider::new(&mut params.mvis_repeat_count, 1..=10));
+                ui.end_row();
 
-                    ui.label("");
-                    ui.label("Bar Thickness");
-                    animate_selector(ui, &mut params.animate_mvis_bar_thickness);
-                    normalized_slider_f32(ui, &mut params.mvis_bar_thickness, 0.5..=20.0);
-                    ui.end_row();
-
-                    ui.label("");
-                    ui.label("Spectrum Repeats");
-                    ui.label("");
-                    ui.add(egui::Slider::new(&mut params.mvis_repeat_count, 1..=8));
-                    ui.end_row();
+                for param in mvis::params::FloatParam::all() {
+                    let meta = param.meta();
+                    if meta.category == mvis::params::ParamCategory::Visuals || meta.category == mvis::params::ParamCategory::System {
+                        param_row_ui(ui, params, *param);
+                    }
                 }
             });
     });
@@ -638,13 +619,13 @@ fn draw_global_rules_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
                 lock_toggle(ui, params, "matrix_base");
                 ui.label("Matrix Random Base");
                 ui.label("");
-                normalized_slider_f32(ui, &mut params.matrix_base, -1.0..=1.0);
+                normalized_slider_f32(ui, &mut params.matrix_base, -10.0..=10.0);
                 ui.end_row();
 
                 lock_toggle(ui, params, "matrix_spread");
                 ui.label("Matrix Random Spread");
                 ui.label("");
-                normalized_slider_f32(ui, &mut params.matrix_spread, 0.0..=1.0);
+                normalized_slider_f32(ui, &mut params.matrix_spread, 0.0..=10.0);
                 ui.end_row();
 
                 ui.label("");
@@ -678,7 +659,7 @@ fn draw_global_rules_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
                 use rand::Rng;
                 let mut rng = rand::thread_rng();
                 let base = params.matrix_base;
-                let spread = params.matrix_spread;
+                let spread = params.matrix_spread.max(0.0001);
                 for i in 0..10 {
                     for j in 0..10 {
                         params.interaction_matrix[i][j] =
@@ -701,21 +682,30 @@ fn draw_global_rules_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
                 use rand::Rng;
                 let mut rng = rand::thread_rng();
 
-                macro_rules! randomize {
-                    ($field:ident, $range:expr) => {
-                        if !params.locked_parameters.contains(&stringify!($field).to_string()) {
-                            params.$field = rng.gen_range($range);
-                        }
+                for param in mvis::params::FloatParam::all() {
+                    let meta = param.meta();
+                    if !params.locked_parameters.contains(&meta.id.to_string()) {
+                        let val = rng.gen_range(meta.slider_range.clone());
+                        param.set_val(params, val);
+                        
+                        let sources = [
+                            mvis::params::AnimateSource::Off,
+                            mvis::params::AnimateSource::Sine,
+                            mvis::params::AnimateSource::Square,
+                            mvis::params::AnimateSource::Triangle,
+                            mvis::params::AnimateSource::Sawtooth,
+                            mvis::params::AnimateSource::SubBass,
+                            mvis::params::AnimateSource::Bass,
+                            mvis::params::AnimateSource::LowMid,
+                            mvis::params::AnimateSource::Mid,
+                            mvis::params::AnimateSource::HighMid,
+                            mvis::params::AnimateSource::High,
+                            mvis::params::AnimateSource::Air,
+                        ];
+                        let idx = rng.gen_range(0..sources.len());
+                        param.set_anim_source(params, sources[idx]);
                     }
                 }
-
-                // Environment
-                randomize!(attraction_strength, 10.0..100.0);
-                randomize!(min_dist, 10.0..80.0);
-                randomize!(interaction_radius, 50.0..250.0);
-                randomize!(density_limit, 0.2..3.0);
-                randomize!(dampening, 0.85..0.98);
-                randomize!(global_gravity, 0.0..0.05);
             }
         });
     });
@@ -735,6 +725,19 @@ fn draw_type_proportions_panel(ui: &mut egui::Ui, params: &mut SimulationParams)
             }
         });
 
+        ui.collapsing("Colors", |ui| {
+            for i in 0..params.particle_types {
+                ui.horizontal(|ui| {
+                    ui.label(format!("Type {}", i));
+                    let srgba = params.colors[i].to_srgba();
+                    let mut egui_color = [srgba.red, srgba.green, srgba.blue, srgba.alpha];
+                    if ui.color_edit_button_rgba_unmultiplied(&mut egui_color).changed() {
+                        params.colors[i] = Color::srgba(egui_color[0], egui_color[1], egui_color[2], egui_color[3]);
+                    }
+                });
+            }
+        });
+
         ui.collapsing("Interaction Matrix", |ui| {
             egui::Grid::new("interaction_matrix_grid").show(ui, |ui| {
                 ui.label("");
@@ -749,7 +752,7 @@ fn draw_type_proportions_panel(ui: &mut egui::Ui, params: &mut SimulationParams)
                         ui.add(
                             egui::DragValue::new(&mut params.interaction_matrix[i][j])
                                 .speed(0.01)
-                                .range(-1.0..=1.0),
+                                .range(-20.0..=20.0),
                         );
                     }
                     ui.end_row();
@@ -1236,7 +1239,13 @@ fn apply_animations(
         params.smoothed_audio_energy -= params.smoothed_audio_energy * (2.0 * dt).min(1.0);
     }
 
-    let reactivity = params.audio_reactivity_power;
+    let mut reactivity = params.audio_reactivity_power;
+
+    if params.animation_speed > 0.0 {
+        params.slider_animation_time += time_advance * params.animation_speed;
+    }
+
+    params.gravity_well_rotation += params.gravity_well_rotation_speed * time_advance;
     let t = params.slider_animation_time;
     let wave_sine = (t.sin() + 1.0) * 0.5; // 0 to 1
     let wave_square = if t.sin() > 0.0 { 1.0 } else { 0.0 };
@@ -1265,59 +1274,28 @@ fn apply_animations(
         }
     };
 
-    if let Some(v) = get_band(params.animate_animation_speed) {
-        params.slider_animation_speed = (v * 5.0 * reactivity).clamp(0.0, 5.0);
-    }
-
-    if params.slider_animation_speed > 0.0 {
-        params.slider_animation_time += time_advance * params.slider_animation_speed;
-    }
-
-    if let Some(v) = get_band(params.animate_attraction) {
-        params.attraction_strength = (v * 100.0 * reactivity).clamp(0.0, 200.0);
-    }
-    if let Some(v) = get_band(params.animate_dampening) {
-        params.dampening = (0.5 + (v * 0.5 * reactivity)).clamp(0.5, 1.0);
-    }
-    if let Some(v) = get_band(params.animate_min_dist) {
-        params.min_dist = (v * 100.0 * reactivity).clamp(0.0, 200.0);
-    }
-    if let Some(v) = get_band(params.animate_interaction_radius) {
-        params.interaction_radius = (50.0 + (v * 300.0 * reactivity)).clamp(50.0, 500.0);
-    }
-    if let Some(v) = get_band(params.animate_density_limit) {
-        params.density_limit = (v * 5.0 * reactivity).clamp(0.0, 10.0);
-    }
-    if let Some(v) = get_band(params.animate_global_gravity) {
-        params.global_gravity = (v * 0.5 * reactivity).clamp(-0.5, 0.5);
-    }
-    if let Some(v) = get_band(params.animate_gravity_well_rotation) {
-        params.gravity_well_rotation_speed = (v * 5.0 * reactivity).clamp(-5.0, 5.0);
-    }
-    params.gravity_well_rotation += params.gravity_well_rotation_speed * time_advance;
-    if let Some(v) = get_band(params.animate_gravity_well_distance_power) {
-        params.gravity_well_distance_power = (v * 5.0 * reactivity).clamp(-5.0, 5.0);
-    }
-    if let Some(v) = get_band(params.animate_time_scale) {
-        params.time_scale = (v * 1.0 * reactivity).clamp(0.0, 2.0);
-    }
-    if let Some(v) = get_band(params.animate_gravity_well_radius) {
-        params.gravity_well_radius = (v * 2000.0 * reactivity).clamp(0.0, 2000.0);
-    }
-    if let Some(v) = get_band(params.animate_emission_intensity) {
-        params.emission_intensity = (0.1 + (v * 10.0 * reactivity)).clamp(0.1, 10.0);
-    }
-    if let Some(v) = get_band(params.animate_record_radius) {
-        params.record_radius = (50.0 + (v * 1000.0 * reactivity)).clamp(50.0, 1000.0);
-    }
-    if let Some(v) = get_band(params.animate_record_rotation_speed) {
-        params.record_rotation_speed = (v * 10.0 * reactivity).clamp(-10.0, 10.0);
-    }
-    if let Some(v) = get_band(params.animate_mvis_spectrum_height) {
-        params.mvis_spectrum_height = (10.0 + (v * 500.0 * reactivity)).clamp(10.0, 500.0);
-    }
-    if let Some(v) = get_band(params.animate_mvis_bar_thickness) {
-        params.mvis_bar_thickness = (0.5 + (v * 20.0 * reactivity)).clamp(0.5, 20.0);
+    let smooth_amount = params.smoothing_strength.clamp(0.0, 0.99);
+    
+    for param in mvis::params::FloatParam::all() {
+        let meta = param.meta();
+        let source = param.get_anim_source(&params);
+        if let Some(v) = get_band(source) {
+            let min = *meta.slider_range.start();
+            let max = *meta.slider_range.end();
+            let center = if min < 0.0 && max > 0.0 { 0.0 } else { min };
+            
+            // Map v from center to max
+            let target = (center + (v * reactivity) * (max - center)).clamp(min, max);
+            
+            if !params.locked_parameters.contains(&meta.id.to_string()) {
+                if params.smoothed_parameters.contains(&meta.id.to_string()) {
+                    let current = param.get_val(&params);
+                    param.set_val(&mut params, current + (target - current) * (1.0 - smooth_amount));
+                } else {
+                    param.set_val(&mut params, target);
+                }
+            }
+        }
     }
 
     if params.is_animating_time {
@@ -1342,7 +1320,7 @@ fn apply_animations(
             let j = rng.gen_range(0..params.particle_types);
             let drift = rng.gen_range(-0.01..0.01);
             params.interaction_matrix[i][j] =
-                (params.interaction_matrix[i][j] + drift).clamp(-2.0, 2.0);
+                (params.interaction_matrix[i][j] + drift).clamp(-20.0, 20.0);
         }
     }
 }
@@ -1428,8 +1406,10 @@ fn draw_gravity_wells(mut gizmos: Gizmos, params: Res<SimulationParams>) {
                 Vec2::new(offset_x, 0.0)
             }
             GravityWellPattern::Spiral => {
-                let angle = (i as f32) * std::f32::consts::PI * 1.5;
-                let r = (i as f32 + 1.0) * (params.gravity_well_radius * 0.2);
+                let t = i as f32 / 1.0f32.max(num_wells as f32 - 1.0);
+                let turns = 2.0f32.max(num_wells as f32 / 25.0);
+                let angle = t * std::f32::consts::TAU * turns;
+                let r = t.powf(0.8) * params.gravity_well_radius;
                 Vec2::new(angle.cos(), angle.sin()) * r
             }
             GravityWellPattern::Star => {

@@ -182,48 +182,32 @@ fn main() {
                 };
             }
 
-            randomize!(attraction_strength, 10.0..100.0);
-            randomize!(min_dist, 10.0..80.0);
-            randomize!(interaction_radius, 50.0..250.0);
-            randomize!(density_limit, 0.2..3.0);
-            randomize!(dampening, 0.85..0.98);
-            randomize!(global_gravity, 0.0..0.05);
-            randomize!(emission_intensity, 0.5..3.0);
-
-            let sources = [
-                AnimateSource::Off,
-                AnimateSource::Sine,
-                AnimateSource::Square,
-                AnimateSource::Triangle,
-                AnimateSource::Sawtooth,
-                AnimateSource::SubBass,
-                AnimateSource::Bass,
-                AnimateSource::LowMid,
-                AnimateSource::Mid,
-                AnimateSource::HighMid,
-                AnimateSource::High,
-                AnimateSource::Air,
-            ];
-
-            randomize_choice!(animate_attraction, sources);
-            randomize_choice!(animate_min_dist, sources);
-            randomize_choice!(animate_interaction_radius, sources);
-            randomize_choice!(animate_density_limit, sources);
-            randomize_choice!(animate_dampening, sources);
-            randomize_choice!(animate_global_gravity, sources);
-            randomize_choice!(animate_time_scale, sources);
-            randomize_choice!(animate_animation_speed, sources);
-            randomize_choice!(animate_gravity_well_rotation, sources);
-            randomize_choice!(animate_gravity_well_distance_power, sources);
-            randomize_choice!(animate_gravity_well_radius, sources);
-            randomize_choice!(animate_emission_intensity, sources);
-            randomize_choice!(animate_record_radius, sources);
-            randomize_choice!(animate_record_rotation_speed, sources);
-            randomize_choice!(animate_mvis_spectrum_height, sources);
-            randomize_choice!(animate_mvis_bar_thickness, sources);
+            for param in mvis::params::FloatParam::all() {
+                let meta = param.meta();
+                if !app_config.simulation.locked_parameters.contains(&meta.id.to_string()) {
+                    let val = rng.gen_range(meta.slider_range.clone());
+                    param.set_val(&mut app_config.simulation, val);
+                    
+                    let sources = [
+                        AnimateSource::Off,
+                        AnimateSource::Sine,
+                        AnimateSource::Square,
+                        AnimateSource::Triangle,
+                        AnimateSource::Sawtooth,
+                        AnimateSource::SubBass,
+                        AnimateSource::Bass,
+                        AnimateSource::LowMid,
+                        AnimateSource::Mid,
+                        AnimateSource::HighMid,
+                        AnimateSource::High,
+                        AnimateSource::Air,
+                    ];
+                    let idx = rng.gen_range(0..sources.len());
+                    param.set_anim_source(&mut app_config.simulation, sources[idx]);
+                }
+            }
 
             randomize!(gravity_wells, 1..10);
-            randomize!(gravity_well_radius, 100.0..1000.0);
             randomize_choice!(gravity_center_well, [true, false]);
 
             let patterns = [

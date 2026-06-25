@@ -65,8 +65,10 @@
             inherit nativeBuildInputs buildInputs;
 
             postInstall = ''
-              cp -r assets $out/bin/
-              wrapProgram $out/bin/mvis \
+              cp -r assets $out/bin/ || true
+              wrapProgram $out/bin/mvis-wallpaper \
+                --prefix LD_LIBRARY_PATH : "${makeLibraryPath buildInputs}"
+              wrapProgram $out/bin/mvis-cli \
                 --prefix LD_LIBRARY_PATH : "${makeLibraryPath buildInputs}"
             '';
           };

@@ -17,7 +17,7 @@ pub enum AnimateSource {
     High,
     Air,
 }
-//TODO impl to<u32> or what ever the gpu needs to avoid matching in ./gpu_pipeline
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum GravityWellPattern {
     None,
@@ -54,50 +54,286 @@ pub enum MusicInfoAnchor {
     BottomRight,
 }
 
-// TODO split this can i seed multiple params so AnimationPararms, VisualParams unless this some how make it faster
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum ParamCategory {
+    Physics,
+    GravityWells,
+    Visuals,
+    System,
+}
+
+pub struct ParamMeta {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub slider_range: std::ops::RangeInclusive<f32>,
+    pub category: ParamCategory,
+}
+
+macro_rules! define_simulation_params {
+    (
+        $(
+            $field:ident {
+                name: $name:expr,
+                default: $default:expr,
+                anim_default: $anim_default:expr,
+                slider_range: $slider_range:expr,
+                category: $category:expr,
+                cli_help: $cli_help:expr
+            }
+        ),* $(,)?
+    ) => {
+        paste::paste! {
+            #[derive(Clone, serde::Serialize, serde::Deserialize)]
+            pub struct GeneratedParams {
+                $( pub $field: f32, )*
+                $( pub [<animate_ $field>]: crate::params::AnimateSource, )*
+            }
+
+            impl Default for GeneratedParams {
+                fn default() -> Self {
+                    Self {
+                        $( $field: $default, )*
+                        $( [<animate_ $field>]: $anim_default, )*
+                    }
+                }
+            }
+
+            #[derive(clap::Args, Debug, Clone)]
+            pub struct GeneratedCliArgs {
+                $(
+                    #[arg(long, help = $cli_help)]
+                    pub $field: Option<f32>,
+                    
+                    #[arg(long, help = concat!("Audio animation source for ", stringify!($name)))]
+                    pub [<animate_ $field>]: Option<String>,
+                )*
+            }
+
+            #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+            pub enum FloatParam {
+                $( [<$field:camel>] , )*
+            }
+
+            impl FloatParam {
+                pub fn all() -> &'static [FloatParam] {
+                    &[ $( FloatParam::[<$field:camel>] ),* ]
+                }
+
+                pub fn meta(&self) -> ParamMeta {
+                    match self {
+                        $(
+                            Self::[<$field:camel>] => ParamMeta {
+                                id: stringify!($field),
+                                name: $name,
+                                slider_range: $slider_range,
+                                category: $category,
+                            },
+                        )*
+                    }
+                }
+
+                pub fn get_val(&self, p: &crate::params::SimulationParams) -> f32 {
+                    match self {
+                        $( Self::[<$field:camel>] => p.generated.$field, )*
+                    }
+                }
+
+                pub fn set_val(&self, p: &mut crate::params::SimulationParams, val: f32) {
+                    match self {
+                        $( Self::[<$field:camel>] => p.generated.$field = val, )*
+                    }
+                }
+                
+                pub fn get_anim_source(&self, p: &crate::params::SimulationParams) -> crate::params::AnimateSource {
+                    match self {
+                        $( Self::[<$field:camel>] => p.generated.[<animate_ $field>], )*
+                    }
+                }
+
+                pub fn set_anim_source(&self, p: &mut crate::params::SimulationParams, source: crate::params::AnimateSource) {
+                    match self {
+                        $( Self::[<$field:camel>] => p.generated.[<animate_ $field>] = source, )*
+                    }
+                }
+            }
+            
+            impl GeneratedParams {
+                pub fn merge_cli(&mut self, cli: &GeneratedCliArgs) {
+                    $(
+                        if let Some(val) = cli.$field {
+                            self.$field = val;
+                        }
+                        /* Needs parser logic for AnimateSource */
+                    )*
+                }
+            }
+        }
+    }
+}
+
+define_simulation_params! {
+    attraction_strength {
+        name: "Force Multiplier",
+        default: 4.1469326,
+        anim_default: crate::params::AnimateSource::LowMid,
+        slider_range: -500.0..=500.0,
+        category: ParamCategory::Physics,
+        cli_help: "Global attraction/repulsion force multiplier"
+    },
+    dampening {
+        name: "Dampening",
+        default: 0.9,
+        anim_default: crate::params::AnimateSource::LowMid,
+        slider_range: 0.0..=1.0,
+        category: ParamCategory::Physics,
+        cli_help: "Friction applied to particle velocity"
+    },
+    min_dist {
+        name: "Minimum Distance",
+        default: 14.654234,
+        anim_default: crate::params::AnimateSource::Sawtooth,
+        slider_range: 0.0..=500.0,
+        category: ParamCategory::Physics,
+        cli_help: "Minimum distance before strong repulsion kicks in"
+    },
+    interaction_radius {
+        name: "Interaction Radius",
+        default: 77.135315,
+        anim_default: crate::params::AnimateSource::Air,
+        slider_range: 10.0..=1000.0,
+        category: ParamCategory::Physics,
+        cli_help: "Radius for particle interactions"
+    },
+    density_limit {
+        name: "Density Limit",
+        default: 0.139289,
+        anim_default: crate::params::AnimateSource::HighMid,
+        slider_range: 0.01..=50.0,
+        category: ParamCategory::Physics,
+        cli_help: "Soft cap on particle density"
+    },
+    global_gravity {
+        name: "Global Gravity",
+        default: 0.0,
+        anim_default: crate::params::AnimateSource::Square,
+        slider_range: -5.0..=5.0,
+        category: ParamCategory::Physics,
+        cli_help: "Constant downward/upward force"
+    },
+    center_gravity {
+        name: "Center Gravity",
+        default: 0.0,
+        anim_default: crate::params::AnimateSource::Off,
+        slider_range: -5.0..=5.0,
+        category: ParamCategory::Physics,
+        cli_help: "Gravitational pull towards the center"
+    },
+    time_scale {
+        name: "Time Scale",
+        default: 0.0630308,
+        anim_default: crate::params::AnimateSource::SubBass,
+        slider_range: -10.0..=10.0,
+        category: ParamCategory::System,
+        cli_help: "Speed of the simulation physics"
+    },
+    animation_speed {
+        name: "Auto-Animate Speed",
+        default: 0.452255,
+        anim_default: crate::params::AnimateSource::Air,
+        slider_range: 0.0..=20.0,
+        category: ParamCategory::System,
+        cli_help: "Speed of auto-animation"
+    },
+    gravity_well_rotation_speed {
+        name: "Rotation Speed",
+        default: 0.315154,
+        anim_default: crate::params::AnimateSource::SubBass,
+        slider_range: -20.0..=20.0,
+        category: ParamCategory::GravityWells,
+        cli_help: "Rotation speed of gravity wells"
+    },
+    gravity_well_distance_power {
+        name: "Distance Power",
+        default: 2.5,
+        anim_default: crate::params::AnimateSource::Off,
+        slider_range: -10.0..=10.0,
+        category: ParamCategory::GravityWells,
+        cli_help: "Inverse distance power for gravity wells"
+    },
+    gravity_well_radius {
+        name: "Pattern Radius",
+        default: 293.084686,
+        anim_default: crate::params::AnimateSource::Sawtooth,
+        slider_range: 0.0..=5000.0,
+        category: ParamCategory::GravityWells,
+        cli_help: "Radius of the gravity well pattern"
+    },
+    emission_intensity {
+        name: "Emission Intensity",
+        default: 1.0045105,
+        anim_default: crate::params::AnimateSource::Air,
+        slider_range: 0.0..=50.0,
+        category: ParamCategory::Visuals,
+        cli_help: "Bloom emission intensity"
+    },
+    record_radius {
+        name: "Record Radius",
+        default: 113.03079,
+        anim_default: crate::params::AnimateSource::SubBass,
+        slider_range: 10.0..=2000.0,
+        category: ParamCategory::Visuals,
+        cli_help: "Radius of the vinyl record"
+    },
+    record_rotation_speed {
+        name: "Record Rotation Speed",
+        default: 1.0,
+        anim_default: crate::params::AnimateSource::Off,
+        slider_range: -50.0..=50.0,
+        category: ParamCategory::Visuals,
+        cli_help: "Rotation speed of the vinyl record"
+    },
+    mvis_spectrum_height {
+        name: "Spectrum Height",
+        default: 100.0,
+        anim_default: crate::params::AnimateSource::Off,
+        slider_range: 1.0..=2000.0,
+        category: ParamCategory::Visuals,
+        cli_help: "Height of the audio spectrum visualizer"
+    },
+    mvis_bar_thickness {
+        name: "Bar Thickness",
+        default: 3.0,
+        anim_default: crate::params::AnimateSource::Off,
+        slider_range: 0.1..=100.0,
+        category: ParamCategory::Visuals,
+        cli_help: "Thickness of audio spectrum bars"
+    }
+}
+
 #[derive(Resource, Clone, ExtractResource, Serialize, Deserialize)]
 pub struct SimulationParams {
+    #[serde(flatten)]
+    pub generated: GeneratedParams,
+
     pub particle_count: usize,
     pub particle_types: usize,
-    pub attraction_strength: f32,
-    pub time_scale: f32,
-    pub min_dist: f32,
     pub region_size: Vec2,
     pub scale: f32,
     pub interaction_matrix: [[f32; 10]; 10],
     pub colors: [Color; 10],
-    pub density_limit: f32,
-    pub interaction_radius: f32,
-    pub dampening: f32,
     pub infinite_space: bool,
-    pub global_gravity: f32,
     pub type_proportions: [f32; 10],
     pub spawn_seed: u32,
     pub continuous_mutation: bool,
     pub is_animating_time: bool,
     pub target_time_scale: f32,
-    pub animate_attraction: AnimateSource,
-    pub animate_min_dist: AnimateSource,
-    pub animate_interaction_radius: AnimateSource,
-    pub animate_density_limit: AnimateSource,
-    pub animate_dampening: AnimateSource,
-    pub animate_global_gravity: AnimateSource,
-    pub slider_animation_speed: f32,
     pub slider_animation_time: f32,
     pub audio_reactivity_power: f32,
     pub auto_camera: bool,
-    pub emission_intensity: f32,
-    pub animate_time_scale: AnimateSource,
-    pub animate_animation_speed: AnimateSource,
     pub gravity_wells: u32,
-    pub gravity_well_radius: f32,
     pub gravity_center_well: bool,
     pub gravity_well_pattern: GravityWellPattern,
     pub gravity_well_rotation: f32,
-    pub gravity_well_rotation_speed: f32,
-    pub animate_gravity_well_rotation: AnimateSource,
-    pub gravity_well_distance_power: f32,
-    pub animate_gravity_well_distance_power: AnimateSource,
     pub disable_wallpaper_colors: bool,
     pub lock_rules: bool,
     pub lock_environment: bool,
@@ -110,22 +346,14 @@ pub struct SimulationParams {
     pub follow_mouse: bool,
     pub show_debug_visuals: bool,
     pub record_exclusion_zone: bool,
-    pub record_radius: f32,
     pub show_mvis_spectrum: bool,
-    pub mvis_spectrum_height: f32,
-    pub mvis_bar_thickness: f32,
     pub mvis_repeat_count: usize,
-    pub record_rotation_speed: f32,
     pub show_ui_menu: bool,
-    pub animate_gravity_well_radius: AnimateSource,
-    pub animate_emission_intensity: AnimateSource,
-    pub animate_record_radius: AnimateSource,
-    pub animate_record_rotation_speed: AnimateSource,
-    pub animate_mvis_spectrum_height: AnimateSource,
-    pub animate_mvis_bar_thickness: AnimateSource,
     pub music_info_anchor: MusicInfoAnchor,
     pub music_info_padding: Vec2,
     pub locked_parameters: Vec<String>,
+    pub smoothed_parameters: Vec<String>,
+    pub smoothing_strength: f32,
     #[serde(skip)]
     pub smoothed_audio_energy: f32,
 }
@@ -186,47 +414,26 @@ impl Default for SimulationParams {
         ];
 
         Self {
+            generated: GeneratedParams::default(),
             particle_count: 15000,
             particle_types: 6,
-            attraction_strength: 4.146932601928711,
-            time_scale: 0.06303079426288605,
-            min_dist: 14.654233932495117,
             region_size: Vec2::new(2560.0, 1080.0),
             scale: 8.0,
             interaction_matrix,
             colors,
-            density_limit: 0.1392890214920044,
-            interaction_radius: 77.13531494140625,
-            dampening: 0.5207346677780151,
             infinite_space: true,
-            global_gravity: 0.0,
             type_proportions,
             spawn_seed: 9,
             continuous_mutation: true,
             is_animating_time: false,
             target_time_scale: 0.05000000074505806,
-            animate_attraction: AnimateSource::LowMid,
-            animate_min_dist: AnimateSource::Sawtooth,
-            animate_interaction_radius: AnimateSource::Air,
-            animate_density_limit: AnimateSource::HighMid,
-            animate_dampening: AnimateSource::LowMid,
-            animate_global_gravity: AnimateSource::Square,
-            slider_animation_speed: 0.4522552490234375,
             slider_animation_time: 11168.76171875,
             audio_reactivity_power: 0.25,
             auto_camera: true,
-            emission_intensity: 1.004510521888733,
-            animate_time_scale: AnimateSource::SubBass,
-            animate_animation_speed: AnimateSource::Air,
             gravity_wells: 1,
-            gravity_well_radius: 293.0846862792969,
             gravity_center_well: true,
             gravity_well_pattern: GravityWellPattern::Grid,
             gravity_well_rotation: 3079.54541015625,
-            gravity_well_rotation_speed: 0.31515395641326904,
-            animate_gravity_well_rotation: AnimateSource::SubBass,
-            gravity_well_distance_power: 2.5,
-            animate_gravity_well_distance_power: AnimateSource::Off,
             disable_wallpaper_colors: true,
             lock_rules: false,
             lock_environment: false,
@@ -239,23 +446,29 @@ impl Default for SimulationParams {
             follow_mouse: false,
             show_debug_visuals: true,
             record_exclusion_zone: true,
-            record_radius: 113.03079223632813,
             show_mvis_spectrum: true,
-            mvis_spectrum_height: 100.0,
-            mvis_bar_thickness: 3.0,
             mvis_repeat_count: 3,
-            record_rotation_speed: 1.0,
             show_ui_menu: true,
-            animate_gravity_well_radius: AnimateSource::Sawtooth,
-            animate_emission_intensity: AnimateSource::Air,
-            animate_record_radius: AnimateSource::SubBass,
-            animate_record_rotation_speed: AnimateSource::Off,
-            animate_mvis_spectrum_height: AnimateSource::Off,
-            animate_mvis_bar_thickness: AnimateSource::Off,
             music_info_anchor: MusicInfoAnchor::BottomLeft,
             music_info_padding: Vec2::new(20.0, 20.0),
             locked_parameters,
+            smoothed_parameters: Vec::new(),
+            smoothing_strength: 0.8,
             smoothed_audio_energy: 0.0,
         }
+    }
+}
+
+impl std::ops::Deref for SimulationParams {
+    type Target = GeneratedParams;
+
+    fn deref(&self) -> &Self::Target {
+        &self.generated
+    }
+}
+
+impl std::ops::DerefMut for SimulationParams {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.generated
     }
 }

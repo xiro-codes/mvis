@@ -3779,6 +3779,7 @@ dependencies = [
  "clap",
  "crossbeam-channel",
  "image",
+ "paste",
  "rand 0.8.6",
  "rustfft",
  "serde",

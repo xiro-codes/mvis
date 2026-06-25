@@ -31,6 +31,7 @@ struct SimParams {
     record_exclusion_zone: u32,
     record_radius: f32,
     spawn_seed: u32,
+    center_gravity: f32,
 };
 
 @group(0) @binding(0) var<uniform> params: SimParams;
@@ -121,7 +122,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let d = length(p_to_center);
         if (d > 0.0) {
             let dir_to_center = p_to_center / d;
-            let force_mag = (params.global_gravity * 100000.0) / (d + 50.0);
+            let force_mag = (params.center_gravity * 100000.0) / (d + 50.0);
             well_force += dir_to_center * force_mag;
         }
     }
@@ -149,9 +150,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let offset_x = (f32(i) - f32(num_wells - 1u) * 0.5) * params.gravity_well_radius;
                 well_pos = vec2<f32>(offset_x, 0.0);
             } else if (params.gravity_well_pattern == 4u) {
-                // Spiral
-                let angle = f32(i) * 3.14159265359 * 1.5;
-                let r = (f32(i) + 1.0) * (params.gravity_well_radius * 0.2);
+                // Sweeping Scoop Spiral (Archimedean-like)
+                let t = f32(i) / max(1.0, f32(num_wells - 1u));
+                let turns = max(2.0, f32(num_wells) / 25.0);
+                let angle = t * 6.28318530718 * turns;
+                let r = pow(t, 0.8) * params.gravity_well_radius;
                 well_pos = vec2<f32>(cos(angle), sin(angle)) * r;
             } else if (params.gravity_well_pattern == 5u) {
                 // Star
@@ -204,26 +207,33 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     p.velocity *= pow(params.dampening, abs(params.time_scale));
     p.position += p.velocity * params.time_scale;
 
-    // Record Exclusion Zone logic (Hard Clamp & Bounce)
+    // Record Exclusion Zone logic (Teleportation through)
     if (params.record_exclusion_zone > 0u) {
         let dist_to_record = distance(p.position, params.mouse_pos);
         if (dist_to_record < params.record_radius) {
-            // Use previous position to determine which side it entered from to prevent tunneling
-            let prev_pos = p.position - p.velocity * params.time_scale;
-            var dir_out = normalize(prev_pos - params.mouse_pos);
+            let p_rel = p.position - params.mouse_pos;
+            var v_dir: vec2<f32>;
+            let vel_len = length(p.velocity);
             
-            // Fallback if prev_pos is exactly at mouse_pos
-            if (length(prev_pos - params.mouse_pos) < 0.001) {
-                dir_out = vec2<f32>(1.0, 0.0);
+            if (vel_len > 0.001) {
+                v_dir = p.velocity / vel_len;
+            } else if (dist_to_record > 0.001) {
+                v_dir = p_rel / dist_to_record;
+            } else {
+                v_dir = vec2<f32>(1.0, 0.0);
             }
             
-            // Push particle strictly outside the record
-            p.position = params.mouse_pos + dir_out * params.record_radius;
+            // Ray-circle intersection to find the exit point
+            let b = 2.0 * dot(p_rel, v_dir);
+            let c = dot(p_rel, p_rel) - (params.record_radius * params.record_radius);
             
-            // Bounce velocity off the record's edge (with slight damping)
-            let dot_vel = dot(p.velocity, dir_out);
-            if (dot_vel < 0.0) {
-                p.velocity = p.velocity - 1.5 * dot_vel * dir_out;
+            let disc = b * b - 4.0 * c;
+            if (disc > 0.0) {
+                let t = (-b + sqrt(disc)) / 2.0;
+                // Add a small margin so it emerges safely outside
+                p.position = p.position + v_dir * (t + 1.0);
+            } else {
+                p.position = params.mouse_pos + v_dir * (params.record_radius + 1.0);
             }
         }
     }
