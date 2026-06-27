@@ -1,5 +1,5 @@
 use clap::{CommandFactory, Parser, Subcommand};
-use mvis::params::{AnimateSource, GravityWellPattern};
+use mvis::params::BarLayout;
 use rand::Rng;
 use std::fs;
 use std::path::PathBuf;
@@ -36,11 +36,7 @@ enum Commands {
         /// Value to set it to
         value: String,
     },
-    /// Lock a parameter from being randomized
-    Lock { key: String },
-    /// Unlock a parameter to allow it to be randomized again
-    Unlock { key: String },
-    /// Randomize all unlocked simulation parameters
+    /// Randomize all simulation parameters
     Randomize,
     /// List all simulation parameters
     List,
@@ -83,17 +79,11 @@ fn main() {
             for param in mvis::params::FloatParam::all() {
                 let meta = param.meta();
                 let val = param.get_val(&app_config.simulation);
-                let anim = param.get_anim_source(&app_config.simulation);
-                let inv = param.get_invert(&app_config.simulation);
-                let locked = app_config.simulation.locked_parameters.contains(&meta.id.to_string());
-                println!("{}: {} (Range: {:.2}..{:.2}) [Locked: {}, Anim: {:?}, Invert: {}]", 
-                         meta.id, val, meta.slider_range.start(), meta.slider_range.end(), locked, anim, inv);
+                println!("{}: {} (Range: {:.2}..{:.2})", 
+                         meta.id, val, meta.slider_range.start(), meta.slider_range.end());
             }
             println!("--- Other Parameters ---");
-            println!("gravity_wells: {}", app_config.simulation.gravity_wells);
-            println!("gravity_center_well: {}", app_config.simulation.gravity_center_well);
-            println!("gravity_well_pattern: {:?}", app_config.simulation.gravity_well_pattern);
-            println!("spawn_seed: {}", app_config.simulation.spawn_seed);
+            println!("bar_layout: {:?}", app_config.simulation.bar_layout);
         }
         Commands::Get { key } => {
             let app_config = mvis::config::AppConfig::load_or_create();
@@ -104,10 +94,7 @@ fn main() {
             }
             
             match key.as_str() {
-                "gravity_wells" => println!("{}", app_config.simulation.gravity_wells),
-                "gravity_center_well" => println!("{}", app_config.simulation.gravity_center_well),
-                "gravity_well_pattern" => println!("{:?}", app_config.simulation.gravity_well_pattern),
-                "spawn_seed" => println!("{}", app_config.simulation.spawn_seed),
+                "bar_layout" => println!("{:?}", app_config.simulation.bar_layout),
                 _ => {
                     eprintln!("Error: Parameter '{}' not found.", key);
                     std::process::exit(1);
@@ -222,104 +209,32 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Lock { key } => {
-            let mut app_config = mvis::config::AppConfig::load_or_create();
-            if !app_config.simulation.locked_parameters.contains(&key) {
-                app_config.simulation.locked_parameters.push(key.clone());
-                app_config.save();
-                println!("Locked parameter: {}", key);
-            } else {
-                println!("Parameter '{}' is already locked.", key);
-            }
-        }
-        Commands::Unlock { key } => {
-            let mut app_config = mvis::config::AppConfig::load_or_create();
-            if let Some(pos) = app_config
-                .simulation
-                .locked_parameters
-                .iter()
-                .position(|x| x == &key)
-            {
-                app_config.simulation.locked_parameters.remove(pos);
-                app_config.save();
-                println!("Unlocked parameter: {}", key);
-            } else {
-                println!("Parameter '{}' is not locked.", key);
-            }
-        }
         Commands::Randomize => {
             let mut app_config = mvis::config::AppConfig::load_or_create();
             let mut rng = rand::thread_rng();
 
-            macro_rules! randomize {
-                ($field:ident, $range:expr) => {
-                    if !app_config
-                        .simulation
-                        .locked_parameters
-                        .contains(&stringify!($field).to_string())
-                    {
-                        app_config.simulation.$field = rng.gen_range($range);
-                    }
-                };
-            }
             macro_rules! randomize_choice {
                 ($field:ident, $choices:expr) => {
-                    if !app_config
-                        .simulation
-                        .locked_parameters
-                        .contains(&stringify!($field).to_string())
-                    {
-                        let idx = rng.gen_range(0..$choices.len());
-                        app_config.simulation.$field = $choices[idx];
-                    }
+                    let idx = rng.gen_range(0..$choices.len());
+                    app_config.simulation.$field = $choices[idx];
                 };
             }
 
             for param in mvis::params::FloatParam::all() {
                 let meta = param.meta();
-                if !app_config.simulation.locked_parameters.contains(&meta.id.to_string()) {
-                    let val = rng.gen_range(meta.slider_range.clone());
-                    param.set_val(&mut app_config.simulation, val);
-                    
-                    let sources = [
-                        AnimateSource::Off,
-                        AnimateSource::Sine,
-                        AnimateSource::Square,
-                        AnimateSource::Triangle,
-                        AnimateSource::Sawtooth,
-                        AnimateSource::SubBass,
-                        AnimateSource::Bass,
-                        AnimateSource::LowMid,
-                        AnimateSource::Mid,
-                        AnimateSource::HighMid,
-                        AnimateSource::High,
-                        AnimateSource::Air,
-                    ];
-                    let idx = rng.gen_range(0..sources.len());
-                    param.set_anim_source(&mut app_config.simulation, sources[idx]);
-                    param.set_invert(&mut app_config.simulation, rng.gen_bool(0.5));
-                }
+                let val = rng.gen_range(meta.slider_range.clone());
+                param.set_val(&mut app_config.simulation, val);
             }
 
-            randomize!(gravity_wells, 1..10);
-            randomize_choice!(gravity_center_well, [true, false]);
-
-            let patterns = [
-                GravityWellPattern::None,
-                GravityWellPattern::Ring,
-                GravityWellPattern::Grid,
-                GravityWellPattern::Line,
-                GravityWellPattern::Spiral,
-                GravityWellPattern::Star,
-                GravityWellPattern::Cross,
-                GravityWellPattern::Random,
+            let layouts = [
+                BarLayout::Circular,
+                BarLayout::Top,
+                BarLayout::Bottom,
             ];
-            randomize_choice!(gravity_well_pattern, patterns);
-
-            app_config.simulation.spawn_seed = app_config.simulation.spawn_seed.wrapping_add(1);
+            randomize_choice!(bar_layout, layouts);
 
             app_config.save();
-            println!("Randomized unlocked parameters!");
+            println!("Randomized parameters!");
         }
     }
 }

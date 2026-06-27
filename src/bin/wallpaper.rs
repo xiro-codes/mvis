@@ -6,15 +6,19 @@ pub struct RecordVinyl;
 #[derive(Component)]
 pub struct RecordSticker;
 
-#[derive(Component)]
-struct MvisBar(usize);
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 use clap::Parser;
 
 use mvis::audio_analysis;
 use mvis::config;
-use mvis::gpu_pipeline;
-use mvis::instanced_render;
+#[derive(Component)]
+pub struct MvisBar(usize);
+
+#[derive(Component)]
+pub struct MvisBarCap(usize);
+
+#[derive(Resource)]
+pub struct BarCapTexture(pub Handle<Image>);
 use mvis::mpd_client;
 use mvis::params::*;
 
@@ -78,60 +82,13 @@ struct MpdTextNode;
 #[derive(Component)]
 struct MpdRootNode;
 
-fn lock_toggle(ui: &mut egui::Ui, params: &mut SimulationParams, key: &str) {
-    ui.horizontal(|ui| {
-        let mut is_locked = params.locked_parameters.iter().any(|x| x == key);
-        let lock_text = if is_locked { "🔒" } else { "🔓" };
-        if ui.toggle_value(&mut is_locked, lock_text).changed() {
-            if is_locked {
-                params.locked_parameters.push(key.to_string());
-            } else {
-                params.locked_parameters.retain(|x| x != key);
-            }
-        }
-    });
-}
 
 fn param_row_ui(ui: &mut egui::Ui, params: &mut SimulationParams, param: mvis::params::FloatParam) {
     let meta = param.meta();
     
-    // Lock, Smooth and Invert toggles
-    ui.horizontal(|ui| {
-        let mut is_locked = params.locked_parameters.iter().any(|x| x == meta.id);
-        let lock_text = if is_locked { "🔒" } else { "🔓" };
-        if ui.toggle_value(&mut is_locked, lock_text).on_hover_text("Lock Parameter").changed() {
-            if is_locked {
-                params.locked_parameters.push(meta.id.to_string());
-            } else {
-                params.locked_parameters.retain(|x| x != meta.id);
-            }
-        }
-
-        let mut is_smoothed = params.smoothed_parameters.iter().any(|x| x == meta.id);
-        let smooth_text = if is_smoothed { "🌊" } else { "〰" };
-        if ui.toggle_value(&mut is_smoothed, smooth_text).on_hover_text("Smooth Animations").changed() {
-            if is_smoothed {
-                params.smoothed_parameters.push(meta.id.to_string());
-            } else {
-                params.smoothed_parameters.retain(|x| x != meta.id);
-            }
-        }
-        
-        let mut invert = param.get_invert(params);
-        let invert_text = if invert { "📉" } else { "📈" };
-        if ui.toggle_value(&mut invert, invert_text).on_hover_text("Invert Wave").changed() {
-            param.set_invert(params, invert);
-        }
-    });
+    ui.label("");
 
     ui.label(meta.name);
-
-    let mut source = param.get_anim_source(params);
-    let original_source = source;
-    animate_selector(ui, &mut source);
-    if source != original_source {
-        param.set_anim_source(params, source);
-    }
 
     let mut val = param.get_val(params);
     if normalized_slider_f32(ui, &mut val, meta.slider_range.clone()).changed() {
@@ -139,38 +96,6 @@ fn param_row_ui(ui: &mut egui::Ui, params: &mut SimulationParams, param: mvis::p
     }
     
     ui.end_row();
-}
-//#TODO smells couldnt we cast the enum to a string
-fn animate_selector(ui: &mut egui::Ui, source: &mut AnimateSource) {
-    egui::ComboBox::from_id_salt(ui.next_auto_id())
-        .selected_text(match *source {
-            AnimateSource::Off => "Off",
-            AnimateSource::Sine => "Sine Wave",
-            AnimateSource::Square => "Square Wave",
-            AnimateSource::Triangle => "Triangle Wave",
-            AnimateSource::Sawtooth => "Sawtooth Wave",
-            AnimateSource::SubBass => "Sub Bass",
-            AnimateSource::Bass => "Bass",
-            AnimateSource::LowMid => "Low Mid",
-            AnimateSource::Mid => "Mid",
-            AnimateSource::HighMid => "High Mid",
-            AnimateSource::High => "High",
-            AnimateSource::Air => "Air",
-        })
-        .show_ui(ui, |ui| {
-            ui.selectable_value(source, AnimateSource::Off, "Off");
-            ui.selectable_value(source, AnimateSource::Sine, "Sine Wave");
-            ui.selectable_value(source, AnimateSource::Square, "Square Wave");
-            ui.selectable_value(source, AnimateSource::Triangle, "Triangle Wave");
-            ui.selectable_value(source, AnimateSource::Sawtooth, "Sawtooth Wave");
-            ui.selectable_value(source, AnimateSource::SubBass, "Sub Bass");
-            ui.selectable_value(source, AnimateSource::Bass, "Bass");
-            ui.selectable_value(source, AnimateSource::LowMid, "Low Mid");
-            ui.selectable_value(source, AnimateSource::Mid, "Mid");
-            ui.selectable_value(source, AnimateSource::HighMid, "High Mid");
-            ui.selectable_value(source, AnimateSource::High, "High");
-            ui.selectable_value(source, AnimateSource::Air, "Air");
-        });
 }
 
 fn main() {
@@ -244,26 +169,20 @@ fn main() {
             enabled: cli.debug,
             timer: Timer::from_seconds(1.0, TimerMode::Repeating),
         })
-        .add_plugins((
-            gpu_pipeline::GpuPhysicsPlugin,
-            instanced_render::InstancedRenderPlugin,
-            EguiPlugin::default(),
-        ))
+        .add_plugins(EguiPlugin::default())
         .add_systems(Startup, (setup_camera, setup_audio))
         .add_systems(
             Update,
             (
-                camera_movement,
                 update_audio_stream,
                 update_mpd_state,
-                apply_animations,
                 update_window_bounds,
                 resize_background,
-                draw_gravity_wells,
-                update_simulation_colors,
-                update_mouse_pos,
                 update_record_visuals,
                 draw_mvis_spectrum,
+                update_simulation_colors,
+                update_mouse_pos,
+
                 debug_memory_usage,
                 update_music_ui_layout,
                 hot_reload_config,
@@ -460,12 +379,7 @@ fn ui_system(
 
             draw_presets_panel(ui, &mut params, &mpd_config, &mut preset_name_input, &mut selected_preset);
 
-            draw_global_rules_panel(ui, &mut params);
             draw_visual_effects_panel(ui, &mut params);
-            draw_physics_panel(ui, &mut params);
-            draw_gravity_wells_panel(ui, &mut params);
-            draw_environment_panel(ui, &mut params);
-            draw_type_proportions_panel(ui, &mut params);
         });
     }
 }
@@ -519,99 +433,6 @@ fn draw_presets_panel(
     });
 }
 
-fn draw_environment_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
-    ui.collapsing("Environment & Basics", |ui| {
-        egui::Grid::new("environment_grid")
-            .num_columns(4)
-            .spacing([10.0, 4.0])
-            .show(ui, |ui| {
-                ui.label("");
-                ui.label("Particle Count");
-                ui.label("");
-                ui.add(egui::Slider::new(&mut params.particle_count, 10..=200_000));
-                ui.end_row();
-
-                ui.label("");
-                ui.label("Particle Types");
-                ui.label("");
-                ui.add(egui::Slider::new(&mut params.particle_types, 1..=10));
-                ui.end_row();
-
-                ui.label("");
-                ui.label("Infinite Space (No Bounds)");
-                ui.label("");
-                ui.checkbox(&mut params.infinite_space, "");
-                ui.end_row();
-
-                ui.label("");
-                ui.label("Auto-Fit Camera");
-                ui.label("");
-                ui.checkbox(&mut params.auto_camera, "");
-                ui.end_row();
-            });
-    });
-}
-
-fn draw_physics_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
-    ui.collapsing("Physics & Forces", |ui| {
-        egui::Grid::new("physics_grid")
-            .num_columns(4)
-            .spacing([10.0, 4.0])
-            .show(ui, |ui| {
-                for param in mvis::params::FloatParam::all() {
-                    let meta = param.meta();
-                    if meta.category == mvis::params::ParamCategory::Physics {
-                        param_row_ui(ui, params, *param);
-                    }
-                }
-            });
-    });
-}
-
-fn draw_gravity_wells_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
-    ui.collapsing("Gravity Wells", |ui| {
-        egui::Grid::new("gravity_wells_grid")
-            .num_columns(4)
-            .spacing([10.0, 4.0])
-            .show(ui, |ui| {
-                lock_toggle(ui, params, "gravity_well_pattern");
-                ui.label("Pattern");
-                ui.label("");
-                egui::ComboBox::from_id_salt("gravity_pattern")
-                    .selected_text(params.gravity_well_pattern.name())
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut params.gravity_well_pattern, GravityWellPattern::None, GravityWellPattern::None.name());
-                        ui.selectable_value(&mut params.gravity_well_pattern, GravityWellPattern::Ring, GravityWellPattern::Ring.name());
-                        ui.selectable_value(&mut params.gravity_well_pattern, GravityWellPattern::Grid, GravityWellPattern::Grid.name());
-                        ui.selectable_value(&mut params.gravity_well_pattern, GravityWellPattern::Line, GravityWellPattern::Line.name());
-                        ui.selectable_value(&mut params.gravity_well_pattern, GravityWellPattern::Spiral, GravityWellPattern::Spiral.name());
-                        ui.selectable_value(&mut params.gravity_well_pattern, GravityWellPattern::Star, GravityWellPattern::Star.name());
-                        ui.selectable_value(&mut params.gravity_well_pattern, GravityWellPattern::Cross, GravityWellPattern::Cross.name());
-                        ui.selectable_value(&mut params.gravity_well_pattern, GravityWellPattern::Random, GravityWellPattern::Random.name());
-                    });
-                ui.end_row();
-
-                ui.label("");
-                ui.label("Wells Count");
-                ui.label("");
-                ui.add(egui::Slider::new(&mut params.gravity_wells, 1..=100));
-                ui.end_row();
-
-                ui.label("");
-                ui.label("Include Center Well");
-                ui.label("");
-                ui.checkbox(&mut params.gravity_center_well, "");
-                ui.end_row();
-
-                for param in mvis::params::FloatParam::all() {
-                    let meta = param.meta();
-                    if meta.category == mvis::params::ParamCategory::GravityWells {
-                        param_row_ui(ui, params, *param);
-                    }
-                }
-            });
-    });
-}
 
 fn draw_visual_effects_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
     ui.collapsing("Visual & Audio Effects", |ui| {
@@ -625,17 +446,6 @@ fn draw_visual_effects_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
                 ui.checkbox(&mut params.disable_wallpaper_colors, "");
                 ui.end_row();
 
-                ui.label("");
-                ui.label("Debug Visuals");
-                ui.label("");
-                ui.checkbox(&mut params.show_debug_visuals, "");
-                ui.end_row();
-
-                ui.label("");
-                ui.label("Global Smoothing Strength");
-                ui.label("");
-                ui.add(egui::Slider::new(&mut params.smoothing_strength, 0.0..=0.99));
-                ui.end_row();
 
                 ui.label("");
                 ui.label("Follow Mouse");
@@ -650,185 +460,79 @@ fn draw_visual_effects_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
                 ui.end_row();
 
                 ui.label("");
+                ui.label("Bar Layout");
+                ui.label("");
+                egui::ComboBox::from_id_salt("bar_layout")
+                    .selected_text(params.bar_layout.name())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut params.bar_layout, BarLayout::Circular, BarLayout::Circular.name());
+                        ui.selectable_value(&mut params.bar_layout, BarLayout::Top, BarLayout::Top.name());
+                        ui.selectable_value(&mut params.bar_layout, BarLayout::Bottom, BarLayout::Bottom.name());
+                    });
+                ui.end_row();
+
+                ui.label("");
+                ui.label("Music Info Anchor");
+                ui.label("");
+                let current_anchor_str = match params.music_info_anchor {
+                    mvis::params::MusicInfoAnchor::TopLeft => "Top Left",
+                    mvis::params::MusicInfoAnchor::TopRight => "Top Right",
+                    mvis::params::MusicInfoAnchor::BottomLeft => "Bottom Left",
+                    mvis::params::MusicInfoAnchor::BottomRight => "Bottom Right",
+                };
+                egui::ComboBox::from_id_salt("music_info_anchor")
+                    .selected_text(current_anchor_str)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut params.music_info_anchor, mvis::params::MusicInfoAnchor::TopLeft, "Top Left");
+                        ui.selectable_value(&mut params.music_info_anchor, mvis::params::MusicInfoAnchor::TopRight, "Top Right");
+                        ui.selectable_value(&mut params.music_info_anchor, mvis::params::MusicInfoAnchor::BottomLeft, "Bottom Left");
+                        ui.selectable_value(&mut params.music_info_anchor, mvis::params::MusicInfoAnchor::BottomRight, "Bottom Right");
+                    });
+                ui.end_row();
+
+                ui.label("");
                 ui.label("Show Spectrum");
                 ui.label("");
                 ui.checkbox(&mut params.show_mvis_spectrum, "");
                 ui.end_row();
 
                 ui.label("");
-                ui.label("Spectrum Multiplier");
+                ui.label("Repeat Count");
                 ui.label("");
                 ui.add(egui::Slider::new(&mut params.mvis_repeat_count, 1..=10));
                 ui.end_row();
 
+                ui.label("");
+                ui.label("Band Count");
+                ui.label("");
+                ui.add(egui::Slider::new(&mut params.mvis_band_count, 1..=128));
+                ui.end_row();
+
+
                 for param in mvis::params::FloatParam::all() {
                     let meta = param.meta();
-                    if meta.category == mvis::params::ParamCategory::Visuals || meta.category == mvis::params::ParamCategory::System {
+                    if meta.category == mvis::params::ParamCategory::Visuals || meta.category == mvis::params::ParamCategory::Visualizer || meta.category == mvis::params::ParamCategory::System {
                         param_row_ui(ui, params, *param);
                     }
                 }
             });
     });
-}
 
-fn draw_global_rules_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
-    ui.collapsing("Randomizer & Ecosystem", |ui| {
-        egui::Grid::new("global_rules_grid")
-            .num_columns(4)
-            .spacing([10.0, 4.0])
-            .show(ui, |ui| {
-                ui.label("");
-                ui.label("Continuous Genetic Mutation");
-                ui.label("");
-                ui.checkbox(&mut params.continuous_mutation, "");
-                ui.end_row();
-
-                lock_toggle(ui, params, "matrix_base");
-                ui.label("Matrix Random Base");
-                ui.label("");
-                normalized_slider_f32(ui, &mut params.matrix_base, -10.0..=10.0);
-                ui.end_row();
-
-                lock_toggle(ui, params, "matrix_spread");
-                ui.label("Matrix Random Spread");
-                ui.label("");
-                normalized_slider_f32(ui, &mut params.matrix_spread, 0.0..=10.0);
-                ui.end_row();
-
-                ui.label("");
-                ui.label("Lock Rules (Matrix & Proportions)");
-                ui.label("");
-                ui.checkbox(&mut params.lock_rules, "");
-                ui.end_row();
-
-                ui.label("");
-                ui.label("Lock Environment (Forces & Radiuses)");
-                ui.label("");
-                ui.checkbox(&mut params.lock_environment, "");
-                ui.end_row();
-
-                ui.label("");
-                ui.label("Lock Gravity Wells");
-                ui.label("");
-                ui.checkbox(&mut params.lock_gravity_wells, "");
-                ui.end_row();
-
-                ui.label("");
-                ui.label("Lock Audio Reactivity");
-                ui.label("");
-                ui.checkbox(&mut params.lock_audio_reactivity, "");
-                ui.end_row();
+    ui.collapsing("Colors", |ui| {
+        for i in 0..params.colors.len() {
+            ui.horizontal(|ui| {
+                ui.label(format!("Color {}", i));
+                let srgba = params.colors[i].to_srgba();
+                let mut egui_color = [srgba.red, srgba.green, srgba.blue, srgba.alpha];
+                if ui.color_edit_button_rgba_unmultiplied(&mut egui_color).changed() {
+                    params.colors[i] = Color::srgba(egui_color[0], egui_color[1], egui_color[2], egui_color[3]);
+                }
             });
-
-        ui.separator();
-        ui.horizontal(|ui| {
-            if ui.button("Randomize Rules").clicked() && !params.lock_rules {
-                use rand::Rng;
-                let mut rng = rand::thread_rng();
-                let base = params.matrix_base;
-                let spread = params.matrix_spread.max(0.0001);
-                for i in 0..10 {
-                    for j in 0..10 {
-                        params.interaction_matrix[i][j] =
-                            rng.gen_range((base - spread)..=(base + spread));
-                    }
-                }
-            }
-            if ui.button("Randomize Proportions").clicked() && !params.lock_rules {
-                use rand::Rng;
-                let mut rng = rand::thread_rng();
-                for i in 0..10 {
-                    params.type_proportions[i] = rng.gen_range(0.1..2.0);
-                }
-                params.spawn_seed = params.spawn_seed.wrapping_add(1);
-            }
-        });
-
-        ui.horizontal(|ui| {
-            if ui.button("Randomize World").clicked() {
-                use rand::Rng;
-                let mut rng = rand::thread_rng();
-
-                for param in mvis::params::FloatParam::all() {
-                    let meta = param.meta();
-                    if !params.locked_parameters.contains(&meta.id.to_string()) {
-                        let val = rng.gen_range(meta.slider_range.clone());
-                        param.set_val(params, val);
-                        
-                        let sources = [
-                            mvis::params::AnimateSource::Off,
-                            mvis::params::AnimateSource::Sine,
-                            mvis::params::AnimateSource::Square,
-                            mvis::params::AnimateSource::Triangle,
-                            mvis::params::AnimateSource::Sawtooth,
-                            mvis::params::AnimateSource::SubBass,
-                            mvis::params::AnimateSource::Bass,
-                            mvis::params::AnimateSource::LowMid,
-                            mvis::params::AnimateSource::Mid,
-                            mvis::params::AnimateSource::HighMid,
-                            mvis::params::AnimateSource::High,
-                            mvis::params::AnimateSource::Air,
-                        ];
-                        let idx = rng.gen_range(0..sources.len());
-                        param.set_anim_source(params, sources[idx]);
-                        param.set_invert(params, rng.gen_bool(0.5));
-                    }
-                }
-            }
-        });
+        }
     });
 }
 
-fn draw_type_proportions_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
-    ui.collapsing("Type Proportions & Matrices", |ui| {
-        ui.collapsing("Proportions", |ui| {
-            for i in 0..params.particle_types {
-                ui.horizontal(|ui| {
-                    ui.label(format!("Type {}", i));
-                    normalized_slider_f32(ui, &mut params.type_proportions[i], 0.0..=5.0);
-                });
-            }
-            if ui.button("Apply Proportions (Respawn)").clicked() {
-                params.spawn_seed = params.spawn_seed.wrapping_add(1);
-            }
-        });
 
-        ui.collapsing("Colors", |ui| {
-            for i in 0..params.particle_types {
-                ui.horizontal(|ui| {
-                    ui.label(format!("Type {}", i));
-                    let srgba = params.colors[i].to_srgba();
-                    let mut egui_color = [srgba.red, srgba.green, srgba.blue, srgba.alpha];
-                    if ui.color_edit_button_rgba_unmultiplied(&mut egui_color).changed() {
-                        params.colors[i] = Color::srgba(egui_color[0], egui_color[1], egui_color[2], egui_color[3]);
-                    }
-                });
-            }
-        });
-
-        ui.collapsing("Interaction Matrix", |ui| {
-            egui::Grid::new("interaction_matrix_grid").show(ui, |ui| {
-                ui.label("");
-                for j in 0..params.particle_types {
-                    ui.label(format!("T{}", j));
-                }
-                ui.end_row();
-
-                for i in 0..params.particle_types {
-                    ui.label(format!("Type {}", i));
-                    for j in 0..params.particle_types {
-                        ui.add(
-                            egui::DragValue::new(&mut params.interaction_matrix[i][j])
-                                .speed(0.01)
-                                .range(-20.0..=20.0),
-                        );
-                    }
-                    ui.end_row();
-                }
-            });
-        });
-    });
-}
 
 fn setup_audio(mut commands: Commands, mpd_config: Res<config::MpdConfig>) {
     let stream_receiver = audio_analysis::start_audio_stream(&mpd_config.fifo_path);
@@ -934,6 +638,15 @@ fn update_mouse_pos(
 
 // TODO: Factor complex query into a type definition
 #[allow(clippy::type_complexity)]
+
+fn update_audio_stream(mut stream: ResMut<audio_analysis::AudioStreamReceiver>) {
+    while let Ok(bands) = stream.receiver.try_recv() {
+        stream.current_bands = bands;
+    }
+}
+
+// TODO: Factor complex query into a type definition
+#[allow(clippy::type_complexity)]
 fn update_record_visuals(
     params: Res<SimulationParams>,
     time: Res<Time>,
@@ -945,7 +658,12 @@ fn update_record_visuals(
     mut sticker_query: Query<(&mut Transform, &mut Visibility), With<RecordSticker>>,
 ) {
     let is_active = params.record_exclusion_zone;
-    let scale = params.record_radius;
+    
+    // Scale the record radius based on window size so it doesn't get too large
+    let min_dimension = params.region_size.x.min(params.region_size.y);
+    let max_radius = min_dimension * 0.5;
+    let scale = params.record_radius.clamp(0.0, 1.0) * max_radius;
+    
     let pos = params.mouse_pos;
 
     // Spin rate based on dedicated rotation parameter
@@ -992,77 +710,178 @@ fn update_record_visuals(
 }
 
 fn draw_mvis_spectrum(
-    mut commands: Commands,
     params: Res<SimulationParams>,
+    stream: Option<Res<audio_analysis::AudioStreamReceiver>>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut Transform, &mut Sprite), (With<MvisBar>, Without<MvisBarCap>)>,
+    mut cap_query: Query<(Entity, &mut Transform, &mut Sprite), (With<MvisBarCap>, Without<MvisBar>)>,
     time: Res<Time>,
-    stream: Res<audio_analysis::AudioStreamReceiver>,
-    mpd_state: Res<MpdState>,
-    mut bar_query: Query<(Entity, &mut Transform, &mut Sprite, &MvisBar)>,
+    cap_texture: Res<BarCapTexture>,
 ) {
-    let num_bands = 128;
-    let total_bars = num_bands * params.mvis_repeat_count;
-
-    // Check if we need to despawn and recreate bars
-    let count = bar_query.iter().count();
-    let should_exist = params.record_exclusion_zone && params.show_mvis_spectrum;
-
-    if !should_exist || count != total_bars {
-        for (entity, _, _, _) in &bar_query {
+    if !params.show_mvis_spectrum {
+        for (entity, _, _) in query.iter() {
             commands.entity(entity).despawn();
         }
-
-        if should_exist {
-            for i in 0..total_bars {
-                commands.spawn((
-                    Sprite {
-                        color: Color::WHITE,
-                        custom_size: Some(Vec2::new(0.0, params.mvis_bar_thickness)),
-                        ..default()
-                    },
-                    Transform::from_xyz(0.0, 0.0, -0.45),
-                    MvisBar(i),
-                ));
-            }
+        for (entity, _, _) in cap_query.iter() {
+            commands.entity(entity).despawn();
         }
         return;
     }
 
-    let radius = params.record_radius;
-    let center = params.mouse_pos;
-    let spin = time.elapsed_secs() * params.record_rotation_speed;
-
-    let colors = mpd_state.album_art_colors.unwrap_or([Color::WHITE; 10]);
-
-    for (_, mut transform, mut sprite, bar) in &mut bar_query {
-        let i = bar.0;
-        let angle = spin + (i as f32 / total_bars as f32) * std::f32::consts::TAU;
-        let dir = Vec2::new(angle.cos(), angle.sin());
-
-        let cycle_idx = i % num_bands;
-        let spec_idx = if cycle_idx < 64 {
-            cycle_idx
-        } else {
-            127 - cycle_idx
-        };
-        let magnitude = stream.current_bands.spectrum[spec_idx];
-
-        let bar_len = (magnitude * params.mvis_spectrum_height).max(1.0);
-
-        sprite.custom_size = Some(Vec2::new(bar_len, params.mvis_bar_thickness));
-
-        // Offset center of the sprite because sprites grow outward from their center
-        let offset = dir * (radius + bar_len * 0.5);
-        transform.translation = (center + offset).extend(-0.45);
-        transform.rotation = Quat::from_rotation_z(angle);
-
-        let color_idx = (i * 10 / total_bars) % 10;
-        sprite.color = colors[color_idx];
+    let Some(stream) = stream else { return };
+    let raw_spectrum = &stream.current_bands.spectrum; // [f32; 128]
+    let num_bands = params.mvis_band_count.min(128).max(1);
+    
+    // Apply spatial smoothing (neighbor pull)
+    let pull = params.mvis_spatial_smoothing.clamp(0.0, 0.99);
+    let mut spectrum = *raw_spectrum;
+    for _ in 0..3 { // 3 passes for a wider Gaussian-like blur
+        let mut temp = spectrum;
+        for b in 0..128 {
+            let left = if b > 0 { spectrum[b - 1] } else { spectrum[0] };
+            let right = if b < 127 { spectrum[b + 1] } else { spectrum[127] };
+            temp[b] = spectrum[b] * (1.0 - pull) + (left + right) * (pull / 2.0);
+        }
+        spectrum = temp;
     }
-}
+    
+    // We can repeat the spectrum N times to wrap around the circle symmetrically
+    let repeats = params.mvis_repeat_count.max(1);
+    let total_bars = num_bands * repeats;
 
-fn update_audio_stream(mut stream: ResMut<audio_analysis::AudioStreamReceiver>) {
-    while let Ok(bands) = stream.receiver.try_recv() {
-        stream.current_bands = bands;
+    let win_width = params.region_size.x;
+    let win_height = params.region_size.y;
+    
+    // Scale the record radius based on window size so it doesn't get too large
+    let min_dimension = win_width.min(win_height);
+    let max_radius = min_dimension * 0.5;
+    let base_radius = params.record_radius.clamp(0.0, 1.0) * max_radius;
+    
+    let max_height = min_dimension * 0.5;
+    let spectrum_height = params.mvis_spectrum_height.clamp(0.0, 1.0) * max_height;
+    
+    let max_thickness = min_dimension * 0.1;
+    let bar_thickness = params.mvis_bar_thickness.clamp(0.0, 1.0) * max_thickness;
+
+    let mut existing_bars = query.iter_mut().collect::<Vec<_>>();
+    existing_bars.sort_by_key(|(e, _, _)| *e); // Ensure predictable ordering if needed
+    
+    let mut existing_caps = cap_query.iter_mut().collect::<Vec<_>>();
+    existing_caps.sort_by_key(|(e, _, _)| *e);
+
+    let colors = &params.colors;
+    let spin = time.elapsed_secs() * params.record_rotation_speed;
+    let smooth_amount = params.mvis_spectrum_smoothing.clamp(0.0, 0.99);
+    let lerp_factor = if smooth_amount < 0.01 {
+        1.0
+    } else {
+        ((1.0 - smooth_amount) * time.delta_secs() * 30.0).min(1.0)
+    };
+    let mut i = 0;
+
+    for _r in 0..repeats {
+        for b in 0..num_bands {
+            // value 0.0 to 1.0 roughly
+            let val = spectrum[b].max(0.01);
+            let target_height = val * spectrum_height;
+
+            let height = if i < existing_bars.len() {
+                let prev_height = existing_bars[i].1.scale.y;
+                prev_height + (target_height - prev_height) * lerp_factor
+            } else {
+                target_height
+            };
+
+            let color = colors[b % colors.len()];
+
+            let angle = (i as f32 / total_bars as f32) * std::f32::consts::TAU + spin;
+
+            let mut transform = Transform::default();
+            let mut cap_transform = Transform::default();
+            
+            match params.bar_layout {
+                BarLayout::Circular => {
+                    // Position along the circle
+                    let dir = Vec2::new(angle.cos(), angle.sin());
+                    let pos = params.mouse_pos + dir * (base_radius + height * 0.5);
+                    transform.translation = pos.extend(0.0);
+                    // -PI/2 so the bar points outwards instead of tangentially
+                    transform.rotation = Quat::from_rotation_z(angle - std::f32::consts::PI / 2.0);
+                    transform.scale = Vec3::new(bar_thickness, height, 1.0);
+                    
+                    let cap_pos = params.mouse_pos + dir * (base_radius + height);
+                    cap_transform.translation = cap_pos.extend(0.0);
+                    cap_transform.scale = Vec3::new(bar_thickness, bar_thickness, 1.0);
+                }
+                BarLayout::Bottom => {
+                    let step = win_width / total_bars as f32;
+                    let x = (i as f32 + 0.5) * step - (win_width * 0.5);
+                    let y = -(win_height * 0.5) + (height * 0.5);
+                    transform.translation = Vec3::new(x, y, 0.0);
+                    transform.scale = Vec3::new(bar_thickness, height, 1.0);
+                    
+                    cap_transform.translation = Vec3::new(x, -(win_height * 0.5) + height, 0.0);
+                    cap_transform.scale = Vec3::new(bar_thickness, bar_thickness, 1.0);
+                }
+                BarLayout::Top => {
+                    let step = win_width / total_bars as f32;
+                    let x = (i as f32 + 0.5) * step - (win_width * 0.5);
+                    let y = (win_height * 0.5) - (height * 0.5);
+                    transform.translation = Vec3::new(x, y, 0.0);
+                    transform.scale = Vec3::new(bar_thickness, height, 1.0);
+                    
+                    cap_transform.translation = Vec3::new(x, (win_height * 0.5) - height, 0.0);
+                    cap_transform.scale = Vec3::new(bar_thickness, bar_thickness, 1.0);
+                }
+            }
+
+            if i < existing_bars.len() {
+                let (_, ref mut t, ref mut s) = existing_bars[i];
+                t.translation = transform.translation;
+                t.rotation = transform.rotation;
+                t.scale = transform.scale;
+                s.color = color;
+            } else {
+                commands.spawn((
+                    Sprite {
+                        color,
+                        ..default()
+                    },
+                    transform,
+                    MvisBar(i),
+                ));
+            }
+            
+            if i < existing_caps.len() {
+                let (_, ref mut t, ref mut s) = existing_caps[i];
+                t.translation = cap_transform.translation;
+                t.rotation = cap_transform.rotation;
+                t.scale = cap_transform.scale;
+                s.color = color;
+                s.custom_size = Some(Vec2::new(1.0, 1.0));
+            } else {
+                commands.spawn((
+                    Sprite {
+                        color,
+                        image: cap_texture.0.clone(),
+                        custom_size: Some(Vec2::new(1.0, 1.0)),
+                        ..default()
+                    },
+                    cap_transform,
+                    MvisBarCap(i),
+                ));
+            }
+            
+            i += 1;
+        }
+    }
+
+    // Clean up any extra bars if parameters changed (e.g., fewer repeats)
+    for j in i..existing_bars.len() {
+        commands.entity(existing_bars[j].0).despawn();
+    }
+    for j in i..existing_caps.len() {
+        commands.entity(existing_caps[j].0).despawn();
     }
 }
 
@@ -1158,6 +977,39 @@ fn setup_camera(
 
     let camera = camera_cmds.id();
 
+    // Generate circle texture for rounded tops
+    let size = 32;
+    let mut data = vec![0u8; size * size * 4];
+    for y in 0..size {
+        for x in 0..size {
+            let cx = 15.5;
+            let cy = 15.5;
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let alpha = if dist <= 15.5 {
+                let a = (15.5 - dist).clamp(0.0, 1.0);
+                (a * 255.0) as u8
+            } else {
+                0
+            };
+            let idx = (y * size + x) * 4;
+            data[idx] = 255;
+            data[idx + 1] = 255;
+            data[idx + 2] = 255;
+            data[idx + 3] = alpha;
+        }
+    }
+    let cap_img = Image::new(
+        bevy::render::render_resource::Extent3d { width: size as u32, height: size as u32, depth_or_array_layers: 1 },
+        bevy::render::render_resource::TextureDimension::D2,
+        data,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::default()
+    );
+    let cap_handle = images.add(cap_img);
+    commands.insert_resource(BarCapTexture(cap_handle));
+
     if let Some(path) = &wallpaper.path {
         if let Ok(bytes) = std::fs::read(path) {
             if let Ok(dyn_img) = image::load_from_memory(&bytes) {
@@ -1191,7 +1043,7 @@ fn setup_camera(
     commands.spawn((
         Mesh2d(meshes.add(Circle::new(1.0))),
         MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgba(0.05, 0.05, 0.05, 1.0)))),
-        Transform::from_translation(Vec3::new(0.0, 0.0, -0.5)),
+        Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
         Visibility::Hidden,
         RecordVinyl,
     ));
@@ -1200,219 +1052,24 @@ fn setup_camera(
     commands.spawn((
         Mesh2d(meshes.add(Circle::new(1.0))),
         MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgba(1.0, 1.0, 1.0, 1.0)))),
-        Transform::from_translation(Vec3::new(0.0, 0.0, -0.4)),
+        Transform::from_translation(Vec3::new(0.0, 0.0, 1.1)),
         Visibility::Hidden,
         RecordSticker,
     ));
 }
 
-fn camera_movement(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
-    mut camera_query: Query<&mut Transform, With<Camera>>,
-    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mut params: ResMut<SimulationParams>,
-) {
-    let Ok(mut transform) = camera_query.single_mut() else {
-        return;
-    };
-    let mut direction = Vec3::ZERO;
-    let mut zoom_delta = 0.0;
 
-    if keyboard_input.pressed(KeyCode::KeyW) {
-        direction.y += 1.0;
-    }
-    if keyboard_input.pressed(KeyCode::KeyS) {
-        direction.y -= 1.0;
-    }
-    if keyboard_input.pressed(KeyCode::KeyA) {
-        direction.x -= 1.0;
-    }
-    if keyboard_input.pressed(KeyCode::KeyD) {
-        direction.x += 1.0;
-    }
 
-    if keyboard_input.pressed(KeyCode::KeyQ) {
-        zoom_delta += 1.5 * time.delta_secs();
-    }
-    if keyboard_input.pressed(KeyCode::KeyE) {
-        zoom_delta -= 1.5 * time.delta_secs();
-    }
-
-    // Disable auto camera if user manually pans or zooms
-    if direction.length_squared() > 0.0 || zoom_delta != 0.0 {
-        params.auto_camera = false;
-    }
-
-    if params.auto_camera {
-        if let Ok(window) = window_query.single() {
-            let target_scale_x = (params.region_size.x * 1.05) / window.width().max(1.0);
-            let target_scale_y = (params.region_size.y * 1.05) / window.height().max(1.0);
-            let target_scale = target_scale_x.max(target_scale_y).max(0.1);
-
-            let lerp_factor = (5.0 * time.delta_secs()).min(1.0);
-            transform.translation = transform.translation.lerp(Vec3::ZERO, lerp_factor);
-
-            let current_scale = transform.scale.x;
-            let new_scale = current_scale + (target_scale - current_scale) * lerp_factor;
-            transform.scale = Vec3::splat(new_scale);
-        }
-    } else {
-        if direction.length_squared() > 0.0 {
-            direction = direction.normalize();
-        }
-        let speed = 500.0 * transform.scale.x;
-        transform.translation += direction * speed * time.delta_secs();
-
-        if zoom_delta != 0.0 {
-            transform.scale *= 1.0 + zoom_delta;
-        }
-    }
-}
-
-fn apply_animations(
-    mut params: ResMut<SimulationParams>,
-    stream: Option<Res<audio_analysis::AudioStreamReceiver>>,
-    time: Res<Time>,
-) {
-    let mut time_advance = time.delta_secs();
-    let dt = time.delta_secs();
-
-    // Calculate smoothed audio energy envelope
-    if let Some(stream_ref) = &stream {
-        let bands = &stream_ref.current_bands;
-        let total_energy = (bands.sub_bass
-            + bands.bass
-            + bands.low_mid
-            + bands.mid
-            + bands.high_mid
-            + bands.high
-            + bands.air)
-            / 7.0;
-
-        let attack = 15.0;
-        let release = 2.0;
-        if total_energy > params.smoothed_audio_energy {
-            params.smoothed_audio_energy +=
-                (total_energy - params.smoothed_audio_energy) * (attack * dt).min(1.0);
-        } else {
-            params.smoothed_audio_energy +=
-                (total_energy - params.smoothed_audio_energy) * (release * dt).min(1.0);
-        }
-
-        // Use smoothed energy for frequency modulation (speed up time gracefully)
-        time_advance *= 1.0 + (params.smoothed_audio_energy * params.audio_reactivity_power * 10.0);
-    } else {
-        // Decay to 0 if no audio
-        params.smoothed_audio_energy -= params.smoothed_audio_energy * (2.0 * dt).min(1.0);
-    }
-
-    let reactivity = params.audio_reactivity_power;
-
-    if params.animation_speed > 0.0 {
-        params.slider_animation_time += time_advance * params.animation_speed;
-    }
-
-    params.gravity_well_rotation += params.gravity_well_rotation_speed * time_advance;
-    let t = params.slider_animation_time;
-    let wave_sine = (t.sin() + 1.0) * 0.5; // 0 to 1
-    let wave_square = if t.sin() > 0.0 { 1.0 } else { 0.0 };
-    let wave_triangle = 1.0 - (2.0 * (t / std::f32::consts::TAU).fract() - 1.0).abs();
-    let wave_sawtooth = (t / std::f32::consts::TAU).fract();
-
-    // Amplitude coupling factor
-    // When reactivity is 0, waves are pure mathematical LFOs (mult = 1.0)
-    // When reactivity > 0, they pulse in intensity with the music envelope
-    let audio_mult = 1.0 + (params.smoothed_audio_energy * reactivity * 2.0);
-
-    let get_band = |source: AnimateSource| -> Option<f32> {
-        match source {
-            AnimateSource::Off => None,
-            AnimateSource::Sine => Some(wave_sine * audio_mult),
-            AnimateSource::Square => Some(wave_square * audio_mult),
-            AnimateSource::Triangle => Some(wave_triangle * audio_mult),
-            AnimateSource::Sawtooth => Some(wave_sawtooth * audio_mult),
-            AnimateSource::SubBass => stream.as_deref().map(|s| s.current_bands.sub_bass),
-            AnimateSource::Bass => stream.as_deref().map(|s| s.current_bands.bass),
-            AnimateSource::LowMid => stream.as_deref().map(|s| s.current_bands.low_mid),
-            AnimateSource::Mid => stream.as_deref().map(|s| s.current_bands.mid),
-            AnimateSource::HighMid => stream.as_deref().map(|s| s.current_bands.high_mid),
-            AnimateSource::High => stream.as_deref().map(|s| s.current_bands.high),
-            AnimateSource::Air => stream.as_deref().map(|s| s.current_bands.air),
-        }
-    };
-
-    let smooth_amount = params.smoothing_strength.clamp(0.0, 0.99);
-    
-    for param in mvis::params::FloatParam::all() {
-        let meta = param.meta();
-        let source = param.get_anim_source(&params);
-        if let Some(mut v) = get_band(source) {
-            let min = *meta.slider_range.start();
-            let max = *meta.slider_range.end();
-            let is_centered = min < 0.0 && max > 0.0;
-            let invert = param.get_invert(&params);
-            
-            let center = if is_centered {
-                0.0
-            } else if invert {
-                max
-            } else {
-                min
-            };
-            
-            if invert {
-                v = -v;
-            }
-            
-            let extent = if v >= 0.0 { max - center } else { center - min };
-            let target = (center + (v * reactivity) * extent).clamp(min, max);
-            
-            if !params.locked_parameters.contains(&meta.id.to_string()) {
-                if params.smoothed_parameters.contains(&meta.id.to_string()) {
-                    let current = param.get_val(&params);
-                    param.set_val(&mut params, current + (target - current) * (1.0 - smooth_amount));
-                } else {
-                    param.set_val(&mut params, target);
-                }
-            }
-        }
-    }
-
-    if params.is_animating_time {
-        if params.time_scale > params.target_time_scale {
-            params.time_scale -= time.delta_secs() * 0.5;
-            if params.time_scale <= params.target_time_scale {
-                params.time_scale = params.target_time_scale;
-                params.is_animating_time = false;
-            }
-        } else {
-            params.is_animating_time = false;
-        }
-    }
-
-    // Continuous genetic mutation
-    if params.continuous_mutation {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        // Slightly mutate a few random cells in the interaction matrix each frame
-        for _ in 0..3 {
-            let i = rng.gen_range(0..params.particle_types);
-            let j = rng.gen_range(0..params.particle_types);
-            let drift = rng.gen_range(-0.01..0.01);
-            params.interaction_matrix[i][j] =
-                (params.interaction_matrix[i][j] + drift).clamp(-20.0, 20.0);
-        }
-    }
-}
 
 fn update_window_bounds(
     mut params: ResMut<SimulationParams>,
     window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    camera_query: Query<&Transform, With<Camera>>,
 ) {
+    let scale = camera_query.iter().next().map(|t| Vec2::new(t.scale.x, t.scale.y)).unwrap_or(Vec2::splat(1.0));
     for window in window_query.iter() {
-        let w = window.width();
-        let h = window.height();
+        let w = window.width() * scale.x;
+        let h = window.height() * scale.y;
         if w > 0.0 && h > 0.0 {
             params.region_size = Vec2::new(w, h);
         }
@@ -1437,117 +1094,6 @@ fn resize_background(
                 sprite.custom_size = Some(bg.image_size * scale);
             }
         }
-    }
-}
-
-fn draw_gravity_wells(mut gizmos: Gizmos, params: Res<SimulationParams>) {
-    if !params.show_debug_visuals {
-        return;
-    }
-
-    let num_wells = params.gravity_wells;
-    if num_wells == 0 && !params.gravity_center_well {
-        return;
-    }
-
-    if params.gravity_center_well {
-        gizmos.circle_2d(params.mouse_pos, 15.0, Color::srgba(1.0, 1.0, 1.0, 0.4));
-        gizmos.circle_2d(params.mouse_pos, 5.0, Color::srgba(1.0, 1.0, 1.0, 0.8));
-    }
-
-    if num_wells == 0 || params.gravity_well_pattern == GravityWellPattern::None {
-        return;
-    }
-
-    let rot_cos = params.gravity_well_rotation.cos();
-    let rot_sin = params.gravity_well_rotation.sin();
-
-    for i in 0..num_wells {
-        let mut well_pos = match params.gravity_well_pattern {
-            GravityWellPattern::None => unreachable!(),
-            GravityWellPattern::Ring => {
-                let angle = (i as f32 / num_wells as f32) * std::f32::consts::TAU;
-                Vec2::new(angle.cos(), angle.sin()) * params.gravity_well_radius
-            }
-            GravityWellPattern::Grid => {
-                let cols = (num_wells as f32).sqrt().ceil() as u32;
-                let cols = cols.max(1);
-                let row = i / cols;
-                let col = i % cols;
-                let rows = num_wells.div_ceil(cols);
-                let rows = rows.max(1);
-
-                let offset_x = (col as f32 - (cols - 1) as f32 * 0.5) * params.gravity_well_radius;
-                let offset_y = (row as f32 - (rows - 1) as f32 * 0.5) * params.gravity_well_radius;
-                Vec2::new(offset_x, offset_y)
-            }
-            GravityWellPattern::Line => {
-                let offset_x =
-                    (i as f32 - (num_wells - 1) as f32 * 0.5) * params.gravity_well_radius;
-                Vec2::new(offset_x, 0.0)
-            }
-            GravityWellPattern::Spiral => {
-                let t = i as f32 / 1.0f32.max(num_wells as f32 - 1.0);
-                let turns = 2.0f32.max(num_wells as f32 / 25.0);
-                let angle = t * std::f32::consts::TAU * turns;
-                let r = t.powf(0.8) * params.gravity_well_radius;
-                Vec2::new(angle.cos(), angle.sin()) * r
-            }
-            GravityWellPattern::Star => {
-                let angle = (i as f32 / num_wells as f32) * std::f32::consts::TAU;
-                let r = if i % 2 == 0 {
-                    params.gravity_well_radius
-                } else {
-                    params.gravity_well_radius * 0.4
-                };
-                Vec2::new(angle.cos(), angle.sin()) * r
-            }
-            GravityWellPattern::Cross => {
-                let arms = 4;
-                let points_per_arm = num_wells.div_ceil(arms);
-                let arm_idx = i % arms;
-                let point_idx = i / arms;
-
-                let angle = (arm_idx as f32 / arms as f32) * std::f32::consts::TAU;
-                let r =
-                    ((point_idx as f32 + 1.0) / points_per_arm as f32) * params.gravity_well_radius;
-                Vec2::new(angle.cos(), angle.sin()) * r
-            }
-            GravityWellPattern::Random => {
-                // Use a seeded hash of the index + spawn_seed to keep it stable
-                let hash1 = i.wrapping_mul(374761393).wrapping_add(params.spawn_seed);
-                let hash2 = i.wrapping_mul(668265263).wrapping_add(params.spawn_seed);
-                let rand_angle = (hash1 as f32 / u32::MAX as f32) * std::f32::consts::TAU;
-                let rand_r = (hash2 as f32 / u32::MAX as f32) * params.gravity_well_radius;
-                Vec2::new(rand_angle.cos(), rand_angle.sin()) * rand_r
-            }
-        };
-
-        let rx = well_pos.x * rot_cos - well_pos.y * rot_sin;
-        let ry = well_pos.x * rot_sin + well_pos.y * rot_cos;
-        well_pos = Vec2::new(rx, ry) + params.mouse_pos;
-
-        let dist_from_center = well_pos.distance(params.mouse_pos);
-        let power_mult = 1.0 + (dist_from_center * 0.01) * params.gravity_well_distance_power;
-
-        let alpha = (0.2 * power_mult.abs()).clamp(0.0, 1.0);
-        let color = if power_mult < 0.0 {
-            Color::srgba(1.0, 0.0, 0.0, alpha)
-        } else {
-            Color::srgba(1.0, 1.0, 1.0, alpha)
-        };
-
-        gizmos.circle_2d(well_pos, 10.0 * power_mult.abs().clamp(0.1, 5.0), color);
-        gizmos.line_2d(
-            well_pos - Vec2::new(5.0, 0.0),
-            well_pos + Vec2::new(5.0, 0.0),
-            Color::srgba(1.0, 1.0, 1.0, (alpha + 0.2).clamp(0.0, 1.0)),
-        );
-        gizmos.line_2d(
-            well_pos - Vec2::new(0.0, 5.0),
-            well_pos + Vec2::new(0.0, 5.0),
-            Color::srgba(1.0, 1.0, 1.0, (alpha + 0.2).clamp(0.0, 1.0)),
-        );
     }
 }
 
