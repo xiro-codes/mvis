@@ -41,6 +41,8 @@ pub struct MpdState {
 struct Cli {
     #[arg(short, long)]
     wallpaper: Option<String>,
+    #[arg(long, value_enum)]
+    mode: Option<mvis::params::WallpaperMode>,
     #[arg(short, long)]
     debug: bool,
     #[arg(long)]
@@ -109,6 +111,9 @@ fn main() {
     }
     if let Some(h) = cli.height {
         sim_params.region_size.y = h;
+    }
+    if let Some(m) = cli.mode {
+        sim_params.wallpaper_mode = m;
     }
 
     // Toggle UI controls based on windowed mode
@@ -181,7 +186,6 @@ fn main() {
                 update_record_visuals,
                 draw_mvis_spectrum,
                 update_simulation_colors,
-                update_mouse_pos,
 
                 debug_memory_usage,
                 update_music_ui_layout,
@@ -448,12 +452,6 @@ fn draw_visual_effects_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
 
 
                 ui.label("");
-                ui.label("Follow Mouse");
-                ui.label("");
-                ui.checkbox(&mut params.follow_mouse, "");
-                ui.end_row();
-
-                ui.label("");
                 ui.label("Record Exclusion Zone");
                 ui.label("");
                 ui.checkbox(&mut params.record_exclusion_zone, "");
@@ -468,6 +466,19 @@ fn draw_visual_effects_panel(ui: &mut egui::Ui, params: &mut SimulationParams) {
                         ui.selectable_value(&mut params.bar_layout, BarLayout::Circular, BarLayout::Circular.name());
                         ui.selectable_value(&mut params.bar_layout, BarLayout::Top, BarLayout::Top.name());
                         ui.selectable_value(&mut params.bar_layout, BarLayout::Bottom, BarLayout::Bottom.name());
+                    });
+                ui.end_row();
+
+                ui.label("");
+                ui.label("Wallpaper Mode");
+                ui.label("");
+                egui::ComboBox::from_id_salt("wallpaper_mode")
+                    .selected_text(params.wallpaper_mode.name())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut params.wallpaper_mode, mvis::params::WallpaperMode::Zoom, mvis::params::WallpaperMode::Zoom.name());
+                        ui.selectable_value(&mut params.wallpaper_mode, mvis::params::WallpaperMode::Fit, mvis::params::WallpaperMode::Fit.name());
+                        ui.selectable_value(&mut params.wallpaper_mode, mvis::params::WallpaperMode::Stretch, mvis::params::WallpaperMode::Stretch.name());
+                        ui.selectable_value(&mut params.wallpaper_mode, mvis::params::WallpaperMode::Center, mvis::params::WallpaperMode::Center.name());
                     });
                 ui.end_row();
 
@@ -612,30 +623,6 @@ fn setup_audio(mut commands: Commands, mpd_config: Res<config::MpdConfig>) {
         });
 }
 
-fn update_mouse_pos(
-    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    camera_query: Query<(&Camera, &GlobalTransform)>,
-    mut params: ResMut<SimulationParams>,
-    time: Res<Time>,
-) {
-    if params.follow_mouse {
-        if let (Ok(window), Ok((camera, camera_transform))) =
-            (window_query.single(), camera_query.single())
-        {
-            if let Some(cursor_pos) = window.cursor_position() {
-                if let Ok(world_pos) = camera.viewport_to_world_2d(camera_transform, cursor_pos) {
-                    params.target_mouse_pos = world_pos;
-                }
-            }
-        }
-    } else {
-        params.target_mouse_pos = Vec2::ZERO;
-    }
-
-    let lerp_factor = (10.0 * time.delta_secs()).clamp(0.0, 1.0);
-    params.mouse_pos = params.mouse_pos.lerp(params.target_mouse_pos, lerp_factor);
-}
-
 // TODO: Factor complex query into a type definition
 #[allow(clippy::type_complexity)]
 
@@ -664,7 +651,7 @@ fn update_record_visuals(
     let max_radius = min_dimension * 0.5;
     let scale = params.record_radius.clamp(0.0, 1.0) * max_radius;
     
-    let pos = params.mouse_pos;
+    let pos = Vec2::ZERO;
 
     // Spin rate based on dedicated rotation parameter
     let spin = time.elapsed_secs() * params.record_rotation_speed;
@@ -803,13 +790,13 @@ fn draw_mvis_spectrum(
                 BarLayout::Circular => {
                     // Position along the circle
                     let dir = Vec2::new(angle.cos(), angle.sin());
-                    let pos = params.mouse_pos + dir * (base_radius + height * 0.5);
+                    let pos = dir * (base_radius + height * 0.5);
                     transform.translation = pos.extend(0.0);
                     // -PI/2 so the bar points outwards instead of tangentially
                     transform.rotation = Quat::from_rotation_z(angle - std::f32::consts::PI / 2.0);
                     transform.scale = Vec3::new(bar_thickness, height, 1.0);
                     
-                    let cap_pos = params.mouse_pos + dir * (base_radius + height);
+                    let cap_pos = dir * (base_radius + height);
                     cap_transform.translation = cap_pos.extend(0.0);
                     cap_transform.scale = Vec3::new(bar_thickness, bar_thickness, 1.0);
                 }
@@ -1063,15 +1050,23 @@ fn setup_camera(
 
 fn update_window_bounds(
     mut params: ResMut<SimulationParams>,
-    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    camera_query: Query<&Transform, With<Camera>>,
+    window_query: Query<&Window>,
+    camera_query: Query<(&Camera, &Transform)>,
 ) {
-    let scale = camera_query.iter().next().map(|t| Vec2::new(t.scale.x, t.scale.y)).unwrap_or(Vec2::splat(1.0));
-    for window in window_query.iter() {
-        let w = window.width() * scale.x;
-        let h = window.height() * scale.y;
+    if let Some((camera, camera_transform)) = camera_query.iter().next() {
+        let scale = camera_transform.scale;
+        
+        let (mut w, mut h) = (0.0, 0.0);
+        if let Some(window) = window_query.iter().next() {
+            w = window.width();
+            h = window.height();
+        } else if let Some(logical_size) = camera.logical_viewport_size() {
+            w = logical_size.x;
+            h = logical_size.y;
+        }
+
         if w > 0.0 && h > 0.0 {
-            params.region_size = Vec2::new(w, h);
+            params.region_size = Vec2::new(w * scale.x, h * scale.y);
         }
     }
 }
@@ -1079,21 +1074,36 @@ fn update_window_bounds(
 fn resize_background(
     mut query: Query<(&mut Sprite, &BackgroundSprite)>,
     camera_query: Query<&Transform, With<Camera>>,
-    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    params: Res<SimulationParams>,
 ) {
-    if let Ok(window) = window_query.single() {
-        if let Ok(camera_transform) = camera_query.single() {
-            let w = window.width();
-            let h = window.height();
+    if let Some(camera_transform) = camera_query.iter().next() {
+        let w = params.region_size.x / camera_transform.scale.x;
+        let h = params.region_size.y / camera_transform.scale.y;
 
-            for (mut sprite, bg) in &mut query {
-                let scale_x = (w * camera_transform.scale.x) / bg.image_size.x;
-                let scale_y = (h * camera_transform.scale.y) / bg.image_size.y;
-                let scale = scale_x.max(scale_y);
+        for (mut sprite, bg) in &mut query {
+                let target_size = match params.wallpaper_mode {
+                    mvis::params::WallpaperMode::Zoom => {
+                        let scale_x = (w * camera_transform.scale.x) / bg.image_size.x;
+                        let scale_y = (h * camera_transform.scale.y) / bg.image_size.y;
+                        let scale = scale_x.max(scale_y);
+                        bg.image_size * scale
+                    }
+                    mvis::params::WallpaperMode::Fit => {
+                        let scale_x = (w * camera_transform.scale.x) / bg.image_size.x;
+                        let scale_y = (h * camera_transform.scale.y) / bg.image_size.y;
+                        let scale = scale_x.min(scale_y);
+                        bg.image_size * scale
+                    }
+                    mvis::params::WallpaperMode::Stretch => {
+                        Vec2::new(w * camera_transform.scale.x, h * camera_transform.scale.y)
+                    }
+                    mvis::params::WallpaperMode::Center => {
+                        bg.image_size
+                    }
+                };
 
-                sprite.custom_size = Some(bg.image_size * scale);
+                sprite.custom_size = Some(target_size);
             }
-        }
     }
 }
 

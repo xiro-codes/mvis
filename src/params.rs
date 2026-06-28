@@ -19,6 +19,26 @@ impl BarLayout {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Default, clap::ValueEnum)]
+pub enum WallpaperMode {
+    #[default]
+    Zoom,
+    Fit,
+    Stretch,
+    Center,
+}
+
+impl WallpaperMode {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Zoom => "Zoom",
+            Self::Fit => "Fit",
+            Self::Stretch => "Stretch",
+            Self::Center => "Center",
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Default)]
 pub enum MusicInfoAnchor {
     TopLeft,
@@ -143,21 +163,21 @@ define_simulation_params! {
     },
     mvis_spectrum_smoothing {
         name: "Spectrum Smoothing",
-        default: 0.61875,
+        default: 0.5,
         slider_range: 0.0..=0.99,
         category: ParamCategory::Visuals,
         cli_help: "Amount of temporal smoothing applied to the spectrum"
     },
     mvis_spatial_smoothing {
         name: "Neighbor Pull",
-        default: 0.495,
+        default: 0.5,
         slider_range: 0.0..=0.99,
         category: ParamCategory::Visuals,
         cli_help: "Amount of spatial smoothing across neighbors"
     },
     record_radius {
         name: "Record Radius",
-        default: 1.0,
+        default: 0.50,
         slider_range: 0.0..=1.0,
         category: ParamCategory::Visuals,
         cli_help: "Radius of the vinyl record"
@@ -180,13 +200,11 @@ pub struct SimulationParams {
     pub region_size: Vec2,
     pub audio_reactivity_power: f32,
     pub bar_layout: BarLayout,
+    pub wallpaper_mode: WallpaperMode,
     pub show_mvis_spectrum: bool,
     pub mvis_repeat_count: usize,
     pub mvis_band_count: usize,
     pub disable_wallpaper_colors: bool,
-    pub mouse_pos: Vec2,
-    pub target_mouse_pos: Vec2,
-    pub follow_mouse: bool,
     pub record_exclusion_zone: bool,
     pub show_ui_menu: bool,
     pub music_info_anchor: MusicInfoAnchor,
@@ -205,16 +223,14 @@ impl Default for SimulationParams {
             region_size: Vec2::new(849.0, 505.0),
             audio_reactivity_power: 0.0,
             bar_layout: BarLayout::Circular,
-            show_mvis_spectrum: false,
+            wallpaper_mode: WallpaperMode::Fit,
+            show_mvis_spectrum: true,
             mvis_repeat_count: 3,
             mvis_band_count: 32,
             disable_wallpaper_colors: true,
-            mouse_pos: Vec2::ZERO,
-            target_mouse_pos: Vec2::ZERO,
-            follow_mouse: false,
-            record_exclusion_zone: false,
+            record_exclusion_zone: true,
             show_ui_menu: true,
-            music_info_anchor: MusicInfoAnchor::BottomLeft,
+            music_info_anchor: MusicInfoAnchor::BottomRight,
             music_info_padding: Vec2::ZERO,
         }
     }
